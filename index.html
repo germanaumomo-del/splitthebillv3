@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>作伙算 - 多人團體分帳記帳系統 (港幣本位版)</title>
   
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 1. 採用靜態純 CSS 版本的 Tailwind CDN (100% 免疫手機廣告攔截與 JS 載入延遲，速度極快) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
 
-  <!-- 1. 使用 Safari 雙重守衛安全註冊組件，徹底防止任何時序產生的 ReferenceError -->
+  <!-- 2. 使用 Safari 雙重守衛安全註冊組件，徹底防止任何時序產生的 ReferenceError -->
   <script>
     const initApp = () => {
       Alpine.data('splitApp', () => ({
@@ -35,7 +35,7 @@
           { id: 'lodging', name: '住宿飯店', icon: '🏨', color: 'bg-purple-100 text-purple-600 border-purple-200' },
           { id: 'entertainment', name: '娛樂門票', icon: '🎟️', color: 'bg-pink-100 text-pink-600 border-pink-200' },
           { id: 'shopping', name: '購物血拼', icon: '🛍️', color: 'bg-yellow-100 text-yellow-600 border-yellow-200' },
-          { id: 'other', name: '其他雜項', icon: '📦', color: 'bg-gray-100 text-gray-600 border-gray-200' }
+          { id: 'other', name: '其他雜項', icon: 'bg-gray-100 text-gray-600 border-gray-200' }
         ],
 
         avatarColors: [
@@ -483,10 +483,14 @@
     }
   </script>
 
-  <!-- 2. 正確使用 defer 並鎖定穩定 CDN 版本避免 iOS 重定向攔截 -->
+  <!-- 2. 使用穩定的 Alpine JS 檔案 -->
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 
   <style>
+    /* 100% 覆蓋防護樣式：萬一任何網路因素導致 CSS CDN 無法載入，利用基礎 CSS 進行兜底，確保絕對不跑位 */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
     /* 隱藏滾動條但保持功能 */
     .scrollbar-none::-webkit-scrollbar {
       display: none;
@@ -502,10 +506,10 @@
     }
   </style>
 </head>
-<body class="min-h-screen bg-slate-50 text-slate-800 font-sans pb-16" x-data="splitApp">
+<body class="min-h-screen bg-gray-50 text-gray-800 font-sans pb-16" x-data="splitApp">
 
   <!-- 導覽列 -->
-  <header class="bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-md sticky top-0 z-40">
+  <header class="bg-gradient-to-r from-teal-600 to-green-600 text-white shadow-md sticky top-0 z-40">
     <div class="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div class="flex items-center gap-3">
         <span class="text-3xl shrink-0">⚖️</span>
@@ -514,7 +518,7 @@
           <p class="text-xs text-teal-100 font-medium">親友團體旅遊・支援多幣別匯率換算與分帳</p>
         </div>
       </div>
-      <div class="flex flex-wrap justify-center items-center gap-2 bg-teal-700/50 px-4 py-1.5 rounded-full text-xs shrink-0">
+      <div class="flex flex-wrap justify-center items-center gap-2 bg-teal-700 bg-opacity-50 px-4 py-1.5 rounded-full text-xs shrink-0">
         <span>👥 成員：</span>
         <span class="font-bold text-yellow-300" x-text="members.length + ' 人'"></span>
         <span class="text-teal-300">|</span>
@@ -528,7 +532,7 @@
   <div class="fixed top-20 right-4 z-50 space-y-2 pointer-events-none">
     <template x-if="toast.show">
       <div class="px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce pointer-events-auto"
-           :class="toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'">
+           :class="toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
         <span x-text="toast.type === 'error' ? '⚠️' : '✅'"></span>
         <span x-text="toast.message"></span>
       </div>
@@ -537,18 +541,18 @@
 
   <!-- 客製化確認對話框 (Custom Confirm Modal) -->
   <template x-if="confirmModal.show">
-    <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-100">
+    <div class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-gray-100">
         <div class="text-center">
           <span class="text-4xl shrink-0">⚠️</span>
-          <h3 class="text-lg font-bold text-slate-800 mt-2" x-text="confirmModal.title">確認操作</h3>
-          <p class="text-slate-500 text-sm mt-2" x-text="confirmModal.message"></p>
+          <h3 class="text-lg font-bold text-gray-800 mt-2" x-text="confirmModal.title">確認操作</h3>
+          <p class="text-gray-500 text-sm mt-2" x-text="confirmModal.message"></p>
         </div>
         <div class="flex gap-3 mt-6">
-          <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-all">
+          <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-sm transition-all">
             取消
           </button>
-          <button @click="executeConfirm()" class="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm transition-all shadow-md">
+          <button @click="executeConfirm()" class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm transition-all shadow-md">
             確定
           </button>
         </div>
@@ -560,39 +564,39 @@
   <main class="max-w-6xl mx-auto px-4 mt-6">
     
     <!-- 分頁選單 (加上 shrink-0 確保在任何手機小螢幕上按鈕文字不縮水、不換行) -->
-    <div class="flex bg-white p-1 rounded-xl shadow-sm mb-6 border border-slate-200 overflow-x-auto scrollbar-none">
+    <div class="flex bg-white p-1 rounded-xl shadow-sm mb-6 border border-gray-200 overflow-x-auto scrollbar-none">
       <button 
         @click="activeTab = 'settlement'" 
         class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'settlement' ? 'bg-teal-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'"
+        :class="activeTab === 'settlement' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
       >
         📊 結算對帳
       </button>
       <button 
         @click="activeTab = 'expenses'" 
         class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'expenses' ? 'bg-teal-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'"
+        :class="activeTab === 'expenses' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
       >
         📝 支出明細
       </button>
       <button 
         @click="activeTab = 'add'" 
         class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'add' ? 'bg-teal-600 text-white shadow font-extrabold' : 'text-slate-600 hover:bg-slate-100'"
+        :class="activeTab === 'add' ? 'bg-teal-600 text-white shadow font-extrabold' : 'text-gray-600 hover:bg-gray-100'"
       >
         ➕ 新增支出
       </button>
       <button 
         @click="activeTab = 'members'" 
         class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'members' ? 'bg-teal-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'"
+        :class="activeTab === 'members' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
       >
         👥 成員維護
       </button>
       <button 
         @click="activeTab = 'charts'" 
         class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'charts' ? 'bg-teal-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'"
+        :class="activeTab === 'charts' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
       >
         📈 圓餅統計
       </button>
@@ -602,59 +606,59 @@
     <div x-show="activeTab === 'settlement'" class="space-y-6">
       
       <!-- 匯率管理面板 (摺疊式 - 手機網格優化) -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <button 
           @click="showRateSettings = !showRateSettings" 
-          class="w-full px-6 py-4 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-100 text-left"
+          class="w-full px-6 py-4 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors border-b border-gray-100 text-left"
         >
           <div class="flex items-center gap-2">
             <span class="text-xl shrink-0">⚙️</span>
-            <span class="font-bold text-slate-700 text-sm sm:text-base">自訂匯率設定 (基準貨幣：港幣 HKD)</span>
+            <span class="font-bold text-gray-700 text-sm sm:text-base">自訂匯率設定 (基準貨幣：港幣 HKD)</span>
           </div>
           <span class="text-xs text-teal-600 font-bold shrink-0" x-text="showRateSettings ? '▲ 收合設定' : '▼ 展開設定'"></span>
         </button>
         
         <div x-show="showRateSettings" class="p-4 sm:p-6 bg-white space-y-4" x-transition>
-          <p class="text-xs text-slate-500">請設定 <b>1 單位外幣折合多少港幣 (HKD)</b>。更新此處後，未來新增的帳目將會依新匯率折算：</p>
+          <p class="text-xs text-gray-500">請設定 <b>1 單位外幣折合多少港幣 (HKD)</b>。更新此處後，未來新增的帳目將會依新匯率折算：</p>
           <!-- 手機上改為兩列 (grid-cols-2) 到中大螢幕改為五列 (sm:grid-cols-5) -->
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
             <div>
-              <label class="block text-xs font-bold text-slate-500 mb-1">1 TWD (新台幣)</label>
+              <label class="block text-xs font-bold text-gray-500 mb-1">1 TWD (新台幣)</label>
               <!-- 行動端輸入框優化：字體升為 text-base (16px) 避免 iOS Safari 自動縮放畫面，並透過 sm:text-sm 調節桌面版大小 -->
-              <input type="number" step="0.0001" x-model.number="rates.TWD" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-slate-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <input type="number" step="0.0001" x-model.number="rates.TWD" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-500 mb-1">1 JPY (日圓)</label>
-              <input type="number" step="0.0001" x-model.number="rates.JPY" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-slate-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <label class="block text-xs font-bold text-gray-500 mb-1">1 JPY (日圓)</label>
+              <input type="number" step="0.0001" x-model.number="rates.JPY" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-500 mb-1">1 USD (美金)</label>
-              <input type="number" step="0.01" x-model.number="rates.USD" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-slate-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <label class="block text-xs font-bold text-gray-500 mb-1">1 USD (美金)</label>
+              <input type="number" step="0.01" x-model.number="rates.USD" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-500 mb-1">1 CNY (人民幣)</label>
-              <input type="number" step="0.01" x-model.number="rates.CNY" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-slate-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <label class="block text-xs font-bold text-gray-500 mb-1">1 CNY (人民幣)</label>
+              <input type="number" step="0.01" x-model.number="rates.CNY" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div class="col-span-2 sm:col-span-1">
-              <label class="block text-xs font-bold text-slate-500 mb-1">1 EUR (歐元)</label>
-              <input type="number" step="0.01" x-model.number="rates.EUR" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-slate-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <label class="block text-xs font-bold text-gray-500 mb-1">1 EUR (歐元)</label>
+              <input type="number" step="0.01" x-model.number="rates.EUR" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
           </div>
         </div>
       </div>
 
       <!-- 核心對帳卡片 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-4 border-b pb-3">
           <span class="text-2xl shrink-0">⚡</span>
-          <h2 class="text-lg sm:text-xl font-bold text-slate-800">智慧分帳方案 (最省事還款路徑)</h2>
+          <h2 class="text-lg sm:text-xl font-bold text-gray-800">智慧分帳方案 (最省事還款路徑)</h2>
         </div>
 
         <template x-if="settlementPlans.length === 0">
-          <div class="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-            <span class="text-4xl">🎉</span>
-            <p class="mt-2 text-slate-500 font-semibold">目前無任何欠款，大家都結清囉！</p>
-            <p class="text-xs text-slate-400 mt-1">當您開始新增帳目，系統會自動轉換為港幣並算出最適還款方案。</p>
+          <div class="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+            <span class="text-4xl animate-bounce">🎉</span>
+            <p class="mt-2 text-gray-500 font-semibold">目前無任何欠款，大家都結清囉！</p>
+            <p class="text-xs text-gray-400 mt-1">當您開始新增帳目，系統會自動轉換為港幣並算出最適還款方案。</p>
           </div>
         </template>
 
@@ -662,27 +666,27 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <!-- 還款步驟 (加入 shrink-0 防止 Safari 排版變形) -->
             <div class="space-y-3">
-              <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">建議轉帳步驟：</h3>
+              <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">建議轉帳步驟：</h3>
               <div class="space-y-3">
                 <template x-for="(plan, index) in settlementPlans" :key="index">
-                  <div class="flex items-center justify-between p-3.5 bg-gradient-to-r from-slate-50 to-teal-50/20 border border-slate-200/80 rounded-xl shadow-sm hover:border-teal-300 transition-colors">
+                  <div class="flex items-center justify-between p-3.5 bg-gradient-to-r from-gray-50 to-teal-50 border border-gray-200 rounded-xl shadow-sm hover:border-teal-300 transition-colors">
                     <div class="flex items-center gap-2 sm:gap-3 min-w-0">
                       <div class="flex items-center gap-1.5 min-w-0">
                         <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(plan.from)" x-text="plan.from[0]"></span>
-                        <span class="font-semibold text-slate-700 text-sm truncate" x-text="plan.from"></span>
+                        <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.from"></span>
                       </div>
                       
-                      <span class="text-slate-400 text-[10px] sm:text-xs px-1.5 py-0.5 bg-slate-100 rounded shrink-0">匯款給</span>
+                      <span class="text-gray-400 text-[10px] sm:text-xs px-1.5 py-0.5 bg-gray-100 rounded shrink-0">匯款給</span>
                       
                       <div class="flex items-center gap-1.5 min-w-0">
                         <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(plan.to)" x-text="plan.to[0]"></span>
-                        <span class="font-semibold text-slate-700 text-sm truncate" x-text="plan.to"></span>
+                        <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.to"></span>
                       </div>
                     </div>
 
                     <div class="text-right shrink-0 ml-2">
-                      <span class="text-base sm:text-lg font-black text-emerald-600" x-text="'HK$ ' + plan.amount.toLocaleString()"></span>
-                      <span class="text-[10px] text-slate-400 block">港幣</span>
+                      <span class="text-base sm:text-lg font-black text-green-600" x-text="'HK$ ' + plan.amount.toLocaleString()"></span>
+                      <span class="text-[10px] text-gray-400 block">港幣</span>
                     </div>
                   </div>
                 </template>
@@ -695,28 +699,28 @@
             </div>
 
             <!-- 所有人結算明細 -->
-            <div class="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200">
-              <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">所有人當前結算明細 (折合港幣)：</h3>
+            <div class="bg-gray-50 p-4 sm:p-5 rounded-xl border border-gray-200">
+              <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">所有人當前結算明細 (折合港幣)：</h3>
               <div class="space-y-3">
                 <template x-for="member in members" :key="member">
                   <div class="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm">
                     <div class="flex items-center gap-2 min-w-0">
                       <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
                       <div class="min-w-0">
-                        <span class="font-bold text-slate-700 text-sm block truncate" x-text="member"></span>
-                        <span class="text-[10px] text-slate-400 block truncate" x-text="'已付: HK$ ' + Math.round(memberBalances[member]?.paid || 0).toLocaleString() + ' | 應付: HK$ ' + Math.round(memberBalances[member]?.owed || 0).toLocaleString()"></span>
+                        <span class="font-bold text-gray-700 text-sm block truncate" x-text="member"></span>
+                        <span class="text-[10px] text-gray-400 block truncate" x-text="'已付: HK$ ' + Math.round(memberBalances[member]?.paid || 0).toLocaleString() + ' | 應付: HK$ ' + Math.round(memberBalances[member]?.owed || 0).toLocaleString()"></span>
                       </div>
                     </div>
 
                     <div class="text-right shrink-0 ml-2">
                       <template x-if="(memberBalances[member]?.net || 0) > 0.01">
-                        <span class="text-emerald-600 font-bold text-[11px] sm:text-xs bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100" x-text="'應收回 HK$ ' + Math.round(memberBalances[member]?.net || 0).toLocaleString()"></span>
+                        <span class="text-green-600 font-bold text-[11px] sm:text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100" x-text="'應收回 HK$ ' + Math.round(memberBalances[member]?.net || 0).toLocaleString()"></span>
                       </template>
                       <template x-if="(memberBalances[member]?.net || 0) < -0.01">
-                        <span class="text-rose-600 font-bold text-[11px] sm:text-xs bg-rose-50 px-2 py-1 rounded-full border border-rose-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(memberBalances[member]?.net || 0)).toLocaleString()"></span>
+                        <span class="text-red-600 font-bold text-[11px] sm:text-xs bg-red-50 px-2 py-1 rounded-full border border-red-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(memberBalances[member]?.net || 0)).toLocaleString()"></span>
                       </template>
                       <template x-if="Math.abs(memberBalances[member]?.net || 0) <= 0.01">
-                        <span class="text-slate-400 text-xs font-semibold">已結清</span>
+                        <span class="text-gray-400 text-xs font-semibold">已結清</span>
                       </template>
                     </div>
                   </div>
@@ -729,25 +733,25 @@
 
       <!-- 成員快速狀態與統計卡片 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4">
-          <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center text-2xl shrink-0">💰</div>
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
+          <div class="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center text-2xl shrink-0">💰</div>
           <div>
-            <h4 class="text-sm font-semibold text-slate-400">活動總開銷 (港幣)</h4>
-            <p class="text-xl sm:text-2xl font-black text-slate-800" x-text="'HK$ ' + Math.round(statistics.totalSpending).toLocaleString() + ' 元'"></p>
+            <h4 class="text-sm font-semibold text-gray-400">活動總開銷 (港幣)</h4>
+            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="'HK$ ' + Math.round(statistics.totalSpending).toLocaleString() + ' 元'"></p>
           </div>
         </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4">
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
           <div class="w-12 h-12 bg-teal-100 rounded-full flex items-center justify-center text-2xl shrink-0">🙋‍♂️</div>
           <div>
-            <h4 class="text-sm font-semibold text-slate-400">平均每人消費 (港幣)</h4>
-            <p class="text-xl sm:text-2xl font-black text-slate-800" x-text="'HK$ ' + (members.length > 0 ? Math.round(statistics.totalSpending / members.length).toLocaleString() : 0) + ' 元'"></p>
+            <h4 class="text-sm font-semibold text-gray-400">平均每人消費 (港幣)</h4>
+            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="'HK$ ' + (members.length > 0 ? Math.round(statistics.totalSpending / members.length).toLocaleString() : 0) + ' 元'"></p>
           </div>
         </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4">
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
           <div class="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center text-2xl shrink-0">🧾</div>
           <div>
-            <h4 class="text-sm font-semibold text-slate-400">總消費筆數</h4>
-            <p class="text-xl sm:text-2xl font-black text-slate-800" x-text="expenses.length + ' 筆'"></p>
+            <h4 class="text-sm font-semibold text-gray-400">總消費筆數</h4>
+            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="expenses.length + ' 筆'"></p>
           </div>
         </div>
       </div>
@@ -756,14 +760,14 @@
     <!-- --- 分頁2：支出明細 --- -->
     <div x-show="activeTab === 'expenses'" class="space-y-6">
       <!-- 篩選與工具列 -->
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
         <div class="flex flex-wrap gap-3 items-center">
-          <span class="text-sm text-slate-500 font-bold">過濾條件：</span>
+          <span class="text-sm text-gray-500 font-bold">過濾條件：</span>
           
           <!-- 付款人過濾 -->
           <select 
             x-model="filterPayer"
-            class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-base sm:text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
+            class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-base sm:text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
           >
             <option value="all">所有付款人</option>
             <template x-for="m in members" :key="m">
@@ -774,7 +778,7 @@
           <!-- 類別過濾 -->
           <select 
             x-model="filterCategory"
-            class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-base sm:text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
+            class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-base sm:text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
           >
             <option value="all">所有類別</option>
             <template x-for="cat in categories" :key="cat.id">
@@ -794,17 +798,17 @@
       <!-- 帳目列表 -->
       <div class="space-y-4">
         <template x-if="filteredExpenses.length === 0">
-          <div class="bg-white rounded-2xl p-12 text-center border border-slate-200">
+          <div class="bg-white rounded-2xl p-12 text-center border border-gray-200">
             <span class="text-5xl block mb-2">🔍</span>
-            <p class="text-slate-500 font-bold">找不到符合條件的消費紀錄！</p>
-            <p class="text-slate-400 text-sm mt-1">您可以嘗試調整篩選條件，或是點選上方「新增支出」開始記帳。</p>
+            <p class="text-gray-500 font-bold">找不到符合條件的消費紀錄！</p>
+            <p class="text-gray-400 text-sm mt-1">您可以嘗試調整篩選條件，或是點選上方「新增支出」開始記帳。</p>
           </div>
         </template>
 
         <template x-if="filteredExpenses.length > 0">
           <div class="space-y-4">
             <template x-for="exp in filteredExpenses" :key="exp.id">
-              <div class="bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <!-- 支出基本資訊 -->
                 <div class="flex items-start gap-3.5 min-w-0">
                   <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm shrink-0 border" 
@@ -813,11 +817,11 @@
                   </div>
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-1.5">
-                      <h3 class="font-bold text-slate-800 text-base sm:text-lg truncate break-all max-w-[200px] sm:max-w-none" x-text="exp.description"></h3>
-                      <span class="text-[10px] sm:text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium" x-text="getCategoryObj(exp.category).name"></span>
+                      <h3 class="font-bold text-gray-800 text-base sm:text-lg truncate break-all max-w-[200px] sm:max-w-none" x-text="exp.description"></h3>
+                      <span class="text-[10px] sm:text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium" x-text="getCategoryObj(exp.category).name"></span>
                     </div>
                     
-                    <div class="text-slate-500 text-[11px] sm:text-xs mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <div class="text-gray-500 text-[11px] sm:text-xs mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
                       <span>📅 日期：<b x-text="exp.date"></b></span>
                       <span>👤 付款人：<strong class="text-teal-600" x-text="exp.payer"></strong></span>
                       <span>分攤：<b x-text="exp.splitType === 'equal' ? '全員均分' : '自訂金額'"></b></span>
@@ -825,14 +829,14 @@
 
                     <!-- 分攤人細節 -->
                     <div class="mt-3">
-                      <span class="text-[10px] text-slate-400 block mb-1" x-text="'分攤成員 (' + exp.participants.length + ' 人)：'"></span>
+                      <span class="text-[10px] text-gray-400 block mb-1" x-text="'分攤成員 (' + exp.participants.length + ' 人)：'"></span>
                       <div class="flex flex-wrap gap-1.5">
                         <template x-for="p in exp.participants" :key="p">
-                          <span class="inline-flex items-center gap-1 text-[11px] sm:text-xs bg-slate-50 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-md">
+                          <span class="inline-flex items-center gap-1 text-[11px] sm:text-xs bg-gray-50 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-md">
                             <span class="w-2 h-2 rounded-full shrink-0" :class="getMemberColorClass(p)"></span>
                             <span x-text="p"></span>
                             <!-- 顯示分攤折算港幣金額 -->
-                            <span class="text-[10px] text-slate-400 font-semibold" 
+                            <span class="text-[10px] text-gray-400 font-semibold" 
                                   x-text="'(分攤 HK$ ' + Math.round((exp.splitType === 'equal' ? (exp.amount / exp.participants.length) : (exp.customAmounts[p] || 0)) * exp.rate) + ')'">
                             </span>
                           </span>
@@ -843,20 +847,20 @@
                 </div>
 
                 <!-- 金額與刪除按鈕 -->
-                <div class="flex items-center justify-between md:flex-col md:items-end gap-2 pt-3 border-t md:pt-0 md:border-t-0 border-slate-100">
+                <div class="flex items-center justify-between md:flex-col md:items-end gap-2 pt-3 border-t md:pt-0 md:border-t-0 border-gray-100">
                   <div class="text-left md:text-right">
                     <!-- 顯示原始金額與幣別 -->
-                    <span class="text-lg sm:text-2xl font-black text-slate-800" x-text="getCurrencySymbol(exp.currency) + ' ' + exp.amount.toLocaleString()"></span>
+                    <span class="text-xl sm:text-2xl font-black text-gray-800" x-text="getCurrencySymbol(exp.currency) + ' ' + exp.amount.toLocaleString()"></span>
                     <!-- 顯示折合港幣 -->
                     <span class="text-xs text-teal-600 font-bold block" x-text="'折合港幣 HK$ ' + Math.round(exp.amount * exp.rate).toLocaleString() + ' 元'"></span>
                     <template x-if="exp.currency !== 'HKD'">
-                      <span class="text-[9px] text-slate-400 block" x-text="'(當時匯率: ' + exp.rate + ')'"></span>
+                      <span class="text-[9px] text-gray-400 block" x-text="'(當時匯率: ' + exp.rate + ')'"></span>
                     </template>
                   </div>
                   
                   <button
                     @click="askDeleteExpense(exp.id)"
-                    class="bg-rose-50 hover:bg-rose-100 text-rose-600 p-2 rounded-lg transition-all border border-rose-200 text-xs flex items-center gap-1 font-bold shrink-0"
+                    class="bg-red-50 hover:bg-red-100 text-red-600 p-2 rounded-lg transition-all border border-red-200 text-xs flex items-center gap-1 font-bold"
                     title="刪除此帳目"
                   >
                     🗑️ 刪除
@@ -870,10 +874,10 @@
     </div>
 
     <!-- --- 分頁3：新增支出 --- -->
-    <div x-show="activeTab === 'add'" class="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+    <div x-show="activeTab === 'add'" class="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
       <div class="flex items-center gap-2 mb-6 border-b pb-3">
         <span class="text-2xl shrink-0">✍️</span>
-        <h2 class="text-lg sm:text-xl font-bold text-slate-800">登記一筆新支出</h2>
+        <h2 class="text-lg sm:text-xl font-bold text-gray-800">登記一筆新支出</h2>
       </div>
 
       <form @submit.prevent="handleAddExpense()" class="space-y-5">
@@ -881,10 +885,10 @@
         <!-- 1. 金額 & 幣別 & 名稱 -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div class="sm:col-span-1">
-            <label class="block text-sm font-bold text-slate-600 mb-1.5">消費幣別 <span class="text-rose-500">*</span></label>
+            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費幣別 <span class="text-red-500">*</span></label>
             <select
               x-model="expenseForm.currency"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-slate-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
+              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
             >
               <option value="HKD">HKD (港幣)</option>
               <option value="TWD">TWD (新台幣)</option>
@@ -895,22 +899,22 @@
             </select>
           </div>
           <div class="sm:col-span-2">
-            <label class="block text-sm font-bold text-slate-600 mb-1.5">消費項目名稱 <span class="text-rose-500">*</span></label>
+            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費項目名稱 <span class="text-red-500">*</span></label>
             <input 
               type="text"
               required
               placeholder="例如：台北計程車、大阪晚餐、代購"
               x-model="expenseForm.description"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-base sm:text-sm text-slate-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
+              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-base sm:text-sm text-gray-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
             />
           </div>
         </div>
 
         <!-- 2. 金額與即時折合港幣顯示 -->
         <div>
-          <label class="block text-sm font-bold text-slate-600 mb-1.5">支出金額 <span class="text-rose-500">*</span></label>
+          <label class="block text-sm font-bold text-gray-600 mb-1.5">支出金額 <span class="text-red-500">*</span></label>
           <div class="relative">
-            <span class="absolute left-4 top-2.5 text-slate-400 font-bold" x-text="getCurrencySymbol(expenseForm.currency)"></span>
+            <span class="absolute left-4 top-2.5 text-gray-400 font-bold" x-text="getCurrencySymbol(expenseForm.currency)"></span>
             <input 
               type="number"
               required
@@ -918,12 +922,12 @@
               step="any"
               placeholder="0.00"
               x-model="expenseForm.amount"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-2.5 text-base sm:text-lg text-slate-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
+              class="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-2.5 text-base sm:text-lg text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
             />
           </div>
           <!-- 即時匯率折合提示 -->
           <template x-if="expenseForm.currency !== 'HKD' && Number(expenseForm.amount) > 0">
-            <div class="mt-2 text-xs text-teal-600 font-bold bg-teal-50/50 p-2 rounded-lg border border-teal-100 inline-block"
+            <div class="mt-2 text-xs text-teal-600 font-bold bg-teal-50 p-2 rounded-lg border border-teal-100 inline-block"
                  x-text="'按目前匯率折合港幣 約：HK$ ' + (Number(expenseForm.amount) * rates[expenseForm.currency]).toFixed(2) + ' 元 (1 ' + expenseForm.currency + ' ≈ ' + rates[expenseForm.currency] + ' HKD)'">
             </div>
           </template>
@@ -932,10 +936,10 @@
         <!-- 3. 付款人 & 分類 & 日期 -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label class="block text-sm font-bold text-slate-600 mb-1.5">誰付的錢？ <span class="text-rose-500">*</span></label>
+            <label class="block text-sm font-bold text-gray-600 mb-1.5">誰付的錢？ <span class="text-red-500">*</span></label>
             <select
               x-model="expenseForm.payer"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-slate-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
+              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
             >
               <template x-for="m in members" :key="m">
                 <option :value="m" x-text="m"></option>
@@ -943,10 +947,10 @@
             </select>
           </div>
           <div>
-            <label class="block text-sm font-bold text-slate-600 mb-1.5">消費類別</label>
+            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費類別</label>
             <select
               x-model="expenseForm.category"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-slate-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
+              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
             >
               <template x-for="cat in categories" :key="cat.id">
                 <option :value="cat.id" x-text="cat.icon + ' ' + cat.name"></option>
@@ -954,20 +958,20 @@
             </select>
           </div>
           <div>
-            <label class="block text-sm font-bold text-slate-600 mb-1.5">消費日期</label>
+            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費日期</label>
             <input 
               type="date"
               x-model="expenseForm.date"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-slate-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
+              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
             />
           </div>
         </div>
 
         <!-- 4. 分帳方式 -->
         <div>
-          <label class="block text-sm font-bold text-slate-600 mb-1.5">分攤機制 (以輸入幣別分攤)</label>
+          <label class="block text-sm font-bold text-gray-600 mb-1.5">分攤機制 (以輸入幣別分攤)</label>
           <div class="flex gap-4">
-            <label class="flex-1 flex items-center justify-center gap-2 p-3 border rounded-xl cursor-pointer hover:bg-slate-50 transition-colors font-bold text-sm bg-white border-slate-200">
+            <label class="flex-1 flex items-center justify-center gap-2 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-colors font-bold text-sm bg-white border-gray-200">
               <input 
                 type="radio" 
                 name="splitType" 
@@ -977,7 +981,7 @@
               />
               <span>指定成員 均分</span>
             </label>
-            <label class="flex-1 flex items-center justify-center gap-2 p-3 border rounded-xl cursor-pointer hover:bg-slate-50 transition-colors font-bold text-sm bg-white border-slate-200">
+            <label class="flex-1 flex items-center justify-center gap-2 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-colors font-bold text-sm bg-white border-gray-200">
               <input 
                 type="radio" 
                 name="splitType" 
@@ -991,9 +995,9 @@
         </div>
 
         <!-- 5. 參與分攤成員名單 -->
-        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+        <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
           <div class="flex justify-between items-center mb-3">
-            <span class="text-sm font-bold text-slate-600">誰參與這筆開銷？</span>
+            <span class="text-sm font-bold text-gray-600">誰參與這筆開銷？</span>
             <div class="flex gap-2">
               <button 
                 type="button" 
@@ -1002,11 +1006,11 @@
               >
                 全選
               </button>
-              <span class="text-slate-300 text-xs">|</span>
+              <span class="text-gray-300 text-xs">|</span>
               <button 
                 type="button" 
                 @click="clearAllParticipants()"
-                class="text-xs text-slate-500 hover:underline font-bold"
+                class="text-xs text-gray-500 hover:underline font-bold"
               >
                 全不選
               </button>
@@ -1015,7 +1019,7 @@
 
           <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
             <template x-for="member in members" :key="member">
-              <div class="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100 shadow-sm">
+              <div class="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100 shadow-sm">
                 <!-- 手機防溢出 min-w-0 與 truncate 封裝 -->
                 <label class="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
                   <input 
@@ -1026,19 +1030,19 @@
                     class="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 shrink-0"
                   />
                   <span class="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
-                  <span class="font-semibold text-slate-700 text-sm truncate" x-text="member"></span>
+                  <span class="font-semibold text-gray-700 text-sm truncate" x-text="member"></span>
                 </label>
 
                 <!-- 如果是不均等分帳，顯示金額輸入框 -->
                 <template x-if="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)">
                   <div class="flex items-center gap-1 shrink-0 ml-2">
-                    <span class="text-slate-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
+                    <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
                     <!-- 修正 React className Typos 為 class 並優化行動端字體大小，防縮放 -->
                     <input 
                       type="number"
                       placeholder="金額"
                       x-model.number="expenseForm.customAmounts[member]"
-                      class="w-20 text-right bg-slate-50 border border-slate-200 rounded px-2 py-1 text-base sm:text-xs font-bold font-sans"
+                      class="w-20 text-right bg-gray-50 border border-gray-200 rounded px-2 py-1 text-base sm:text-xs font-bold font-sans"
                     />
                   </div>
                 </template>
@@ -1048,13 +1052,13 @@
           
           <!-- 平分計算提示 -->
           <template x-if="expenseForm.splitType === 'equal' && expenseForm.participants.length > 0 && Number(expenseForm.amount) > 0">
-            <div class="mt-3 text-right text-xs text-slate-500 border-t pt-2 border-dashed border-slate-200 font-semibold space-y-1">
+            <div class="mt-3 text-right text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold space-y-1">
               <div>
                 預估每人分攤：
                 <span class="text-teal-600 font-bold text-sm" x-text="getCurrencySymbol(expenseForm.currency) + ' ' + Math.round(Number(expenseForm.amount) / expenseForm.participants.length) + ' ' + expenseForm.currency"></span>
               </div>
               <template x-if="expenseForm.currency !== 'HKD'">
-                <div class="text-slate-400 text-[11px]">
+                <div class="text-gray-400 text-[11px]">
                   (每人折合約 HK$ <span x-text="Math.round((Number(expenseForm.amount) / expenseForm.participants.length) * rates[expenseForm.currency])"></span> 元)
                 </div>
               </template>
@@ -1063,14 +1067,14 @@
 
           <!-- 不等分計算提示 -->
           <template x-if="expenseForm.splitType === 'custom'">
-            <div class="mt-3 flex justify-between items-center text-xs text-slate-500 border-t pt-2 border-dashed border-slate-200 font-semibold">
+            <div class="mt-3 flex justify-between items-center text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold">
               <span>
                 已分配總和：
-                <strong class="text-slate-700" x-text="sumCustomAmounts() + ' ' + expenseForm.currency"></strong>
+                <strong class="text-gray-700" x-text="sumCustomAmounts() + ' ' + expenseForm.currency"></strong>
               </span>
               <span>
                 剩餘未分配：
-                <strong :class="isCustomAllocationValid() ? 'text-emerald-600' : 'text-rose-500'" 
+                <strong :class="isCustomAllocationValid() ? 'text-green-600' : 'text-red-500'" 
                         x-text="(Number(expenseForm.amount || 0) - sumCustomAmounts()).toFixed(1) + ' ' + expenseForm.currency">
                 </strong>
               </span>
@@ -1081,7 +1085,7 @@
         <!-- 6. 儲存按鈕 -->
         <button 
           type="submit"
-          class="w-full bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-extrabold py-3.5 px-4 rounded-xl shadow-md hover:from-teal-700 hover:to-emerald-700 transition-all flex items-center justify-center gap-2"
+          class="w-full bg-gradient-to-r from-teal-600 to-green-600 text-white font-extrabold py-3.5 px-4 rounded-xl shadow-md hover:from-teal-700 hover:to-green-700 transition-all flex items-center justify-center gap-2"
         >
           <span>💾</span> 儲存這筆開銷
         </button>
@@ -1092,10 +1096,10 @@
     <!-- --- 分頁4：成員維護 --- -->
     <div x-show="activeTab === 'members'" class="max-w-2xl mx-auto space-y-6">
       <!-- 新增成員 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-4 border-b pb-3">
           <span class="text-2xl shrink-0">👥</span>
-          <h2 class="text-lg sm:text-xl font-bold text-slate-800">成員名單管理</h2>
+          <h2 class="text-lg sm:text-xl font-bold text-gray-800">成員名單管理</h2>
         </div>
 
         <form @submit.prevent="handleAddMember()" class="flex gap-2">
@@ -1104,7 +1108,7 @@
             required
             placeholder="輸入新朋友或親人的名字"
             x-model="newMemberName"
-            class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-base sm:text-sm text-slate-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
+            class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-base sm:text-sm text-gray-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
           />
           <button 
             type="submit"
@@ -1116,10 +1120,10 @@
       </div>
 
       <!-- 成員列表 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
-        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4" x-text="'當前成員列表 (' + members.length + ' 人)：'"></h3>
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
+        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4" x-text="'當前成員列表 (' + members.length + ' 人)：'"></h3>
         <template x-if="members.length === 0">
-          <div class="text-center py-8 text-slate-400">
+          <div class="text-center py-8 text-gray-400">
             <span class="text-4xl block">🔍</span>
             目前尚無成員，請於上方欄位新增！
           </div>
@@ -1128,16 +1132,16 @@
         <template x-if="members.length > 0">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <template x-for="member in members" :key="member">
-              <div class="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+              <div class="flex items-center justify-between p-3.5 bg-gray-50 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
                 <div class="flex items-center gap-3 min-w-0">
                   <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
-                  <span class="font-bold text-slate-700 truncate" x-text="member"></span>
+                  <span class="font-bold text-gray-700 truncate" x-text="member"></span>
                 </div>
                 
                 <button 
                   type="button"
                   @click="askDeleteMember(member)"
-                  class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors shrink-0 ml-2"
+                  class="text-gray-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0 ml-2"
                   title="刪除成員"
                 >
                   ❌
@@ -1153,14 +1157,14 @@
     <div x-show="activeTab === 'charts'" class="space-y-6">
       
       <!-- 分類開銷統計 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-6 border-b pb-3">
           <span class="text-2xl shrink-0">🍕</span>
-          <h2 class="text-lg sm:text-xl font-bold text-slate-800">消費分類開銷統計 (折合港幣)</h2>
+          <h2 class="text-lg sm:text-xl font-bold text-gray-800">消費分類開銷統計 (折合港幣)</h2>
         </div>
 
         <template x-if="statistics.totalSpending === 0">
-          <div class="text-center py-12 text-slate-400">
+          <div class="text-center py-12 text-gray-400">
             <span class="text-5xl block mb-2">📊</span>
             尚無記帳紀錄，無法產生圖表！
           </div>
@@ -1173,19 +1177,19 @@
                 <div class="flex justify-between items-center text-sm">
                   <div class="flex items-center gap-2 min-w-0">
                     <span class="shrink-0" x-text="cat.icon"></span>
-                    <span class="font-bold text-slate-700 truncate" x-text="cat.name"></span>
+                    <span class="font-bold text-gray-700 truncate" x-text="cat.name"></span>
                   </div>
-                  <div class="font-semibold text-slate-500 shrink-0 ml-2 text-xs sm:text-sm">
-                    <span class="text-slate-800 font-bold" x-text="'HK$ ' + Math.round(statistics.categorySpending[cat.id] || 0).toLocaleString() + ' 元'"></span>
+                  <div class="font-semibold text-gray-500 shrink-0 ml-2 text-xs sm:text-sm">
+                    <span class="text-gray-800 font-bold" x-text="'HK$ ' + Math.round(statistics.categorySpending[cat.id] || 0).toLocaleString() + ' 元'"></span>
                     <span class="ml-1 sm:ml-2 text-xs text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded" 
                           x-text="Math.round(((statistics.categorySpending[cat.id] || 0) / statistics.totalSpending) * 100) + '%'">
                     </span>
                   </div>
                 </div>
                 <!-- 進度條 -->
-                <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                <div class="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
                   <div 
-                    class="bg-gradient-to-r from-teal-500 to-emerald-500 h-full rounded-full transition-all duration-500"
+                    class="bg-gradient-to-r from-teal-500 to-green-500 h-full rounded-full transition-all duration-500"
                     :style="'width: ' + Math.round(((statistics.categorySpending[cat.id] || 0) / statistics.totalSpending) * 100) + '%'"
                   ></div>
                 </div>
@@ -1196,14 +1200,14 @@
       </div>
 
       <!-- 付款大戶排行榜 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-6 border-b pb-3">
           <span class="text-2xl shrink-0">👑</span>
-          <h2 class="text-lg sm:text-xl font-bold text-slate-800">代墊款項貢獻排行榜 (港幣累計，誰出得最多)</h2>
+          <h2 class="text-lg sm:text-xl font-bold text-gray-800">代墊款項貢獻排行榜 (港幣累計，誰出得最多)</h2>
         </div>
 
         <template x-if="statistics.totalSpending === 0">
-          <div class="text-center py-12 text-slate-400">
+          <div class="text-center py-12 text-gray-400">
             目前無記帳數據
           </div>
         </template>
@@ -1216,13 +1220,13 @@
                 
                 <div class="flex-1 min-w-0 space-y-1">
                   <div class="flex justify-between items-center text-sm">
-                    <span class="font-bold text-slate-700 truncate" x-text="member"></span>
-                    <span class="text-xs font-semibold text-slate-500 shrink-0 ml-2">
-                      累計代墊折合 <strong class="text-slate-800" x-text="'HK$ ' + Math.round(memberBalances[member]?.paid || 0).toLocaleString()"></strong> 元
+                    <span class="font-bold text-gray-700 truncate" x-text="member"></span>
+                    <span class="text-xs font-semibold text-gray-500 shrink-0 ml-2">
+                      累計代墊折合 <strong class="text-gray-800" x-text="'HK$ ' + Math.round(memberBalances[member]?.paid || 0).toLocaleString()"></strong> 元
                     </span>
                   </div>
                   
-                  <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                  <div class="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
                     <div 
                       class="bg-teal-500 h-full rounded-full"
                       :style="'width: ' + Math.round(((memberBalances[member]?.paid || 0) / statistics.totalSpending) * 100) + '%'"
@@ -1240,7 +1244,7 @@
   </main>
 
   <!-- 底部功能說明 -->
-  <footer class="text-center text-slate-400 text-[11px] mt-12 px-4 py-4 border-t border-slate-200">
+  <footer class="text-center text-gray-400 text-[11px] mt-12 px-4 py-4 border-t border-gray-200">
     <p>© 2026 作伙算 - 多人團體分帳記帳系統 | 港幣 (HKD) 本位・支援多國貨幣匯率換算</p>
   </footer>
 </body>
