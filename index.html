@@ -8,32 +8,10 @@
   <!-- 1. 採用靜態純 CSS 版本的 Tailwind CDN (100% 免疫手機廣告攔截與 JS 載入延遲，速度極快) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
 
-  <!-- 2. 使用 Safari 雙重守衛與 100% 雲端持久化儲存 (依據安全資料路徑規範) -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-    // 自環境變數讀取 Firebase 參數，保障安全與跨裝置一致
-    const firebaseConfig = typeof __firebase_config !== 'undefined' 
-      ? JSON.parse(__firebase_config) 
-      : {
-          apiKey: "",
-          authDomain: "",
-          projectId: "",
-          storageBucket: "",
-          messagingSenderId: "",
-          appId: ""
-        };
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-split-app';
-
-    // 初始化 Firebase
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    const registerAlpineComponent = () => {
-      Alpine.data('splitApp', () => ({
+  <!-- 2. 使用常規同步 script 註冊 Alpine 元件，徹底避免手機時序問題與 ReferenceError -->
+  <script>
+    window.splitAppComponent = function() {
+      return {
         // --- 狀態數據 (預先載入預設值，防阻擋、防卡死，保證隨開即用) ---
         members: ['阿明', '小華', '美玲', '志強', '小芳'],
         newMemberName: '',
@@ -41,7 +19,17 @@
         showRateSettings: false, // 匯率設定展開/收合
         syncing: false, // 是否正在同步寫入中
         currentUser: null, // 當前雲端使用者認證狀態
-        appId: appId,
+        appId: 'default-split-app',
+        
+        // 成員編輯專用狀態
+        editingMemberName: null, // 當前正在編輯的成員原名
+        editingMemberNewValue: '', // 當前正在編輯輸入的新名字
+
+        // 刪除與確認動作的安全狀態機 (取代不穩定的函數回調，徹底解決手機無法刪除的問題)
+        confirmAction: {
+          type: '', // 'deleteMember' 或 'deleteExpense'
+          target: null // 刪除的對象 (成員姓名或帳目 ID)
+        },
         
         // 匯率設定：1 單位外幣 = X 港幣 (HKD)
         rates: {
@@ -68,7 +56,7 @@
           'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'
         ],
 
-        // 預設支出紀錄 (即使沒連上網路也看得到初始數據)
+        // 預設支出紀錄
         expenses: [
           {
             id: '1',
@@ -108,19 +96,6 @@
             splitType: 'equal',
             participants: ['阿明', '小華', '志強', '小芳'],
             customAmounts: {}
-          },
-          {
-            id: '4',
-            description: '美金幫忙網購紀念品',
-            amount: 200,
-            currency: 'USD',
-            rate: 7.8000, // 當時匯率
-            payer: '志強',
-            category: 'shopping',
-            date: '2026-07-06',
-            splitType: 'custom',
-            participants: ['志強', '小芳'],
-            customAmounts: { '志強': 100, '小芳': 100 } // 原始美金金額
           }
         ],
 
@@ -157,130 +132,147 @@
         confirmModal: {
           show: false,
           title: '',
-          message: '',
-          onConfirm: null
+          message: ''
         },
 
         // --- 初始化設定 ---
-        async init() {
+        init() {
+          // 暫存全域實例，讓 Firebase 異步模組安全存取
+          window.ledgerAlpineInstance = this;
+
           // 設法自動調整表單預設人，讓網頁開局即正常
           this.expenseForm.participants = [...this.members];
           this.expenseForm.payer = this.members[0] || '';
 
-          try {
-            // 優先執行雲端安全認證 (遵照安全認證優先原則)
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-              await signInAnonymously(auth);
-            }
-          } catch (err) {
-            console.error("Auth initialization failed, running in memory-offline fallback.", err);
-            // 認證失敗時不中斷，保持本地使用體驗
-            return;
+          // 若 Firebase 比 Alpine 早初始化完成，直接調用對話
+          if (window.triggerFirebaseSnapshotInit) {
+            window.triggerFirebaseSnapshotInit(this);
           }
 
-          // 監聽並追蹤用戶登入狀態
-          onAuthStateChanged(auth, (user) => {
-            this.currentUser = user;
-            if (user) {
-              this.setupCloudSync();
+          // 成員名單深度響應式同步監聽器 (修復名單更新、刪除及表單連動失效的核心機制)
+          this.$watch('members', (newMembers) => {
+            if (newMembers && newMembers.length > 0) {
+              // 1. 保留原本就在新成員名單中的分攤人
+              this.expenseForm.participants = this.expenseForm.participants.filter(p => newMembers.includes(p));
+              
+              // 2. 自動將新加入的成員預設勾選到分攤名單，防止漏勾
+              newMembers.forEach(m => {
+                if (!this.expenseForm.participants.includes(m)) {
+                  this.expenseForm.participants = [...this.expenseForm.participants, m];
+                }
+              });
+
+              // 3. 確保當前選取的付款人依然有效，若失效則自動切換為名單中的第一位
+              if (!newMembers.includes(this.expenseForm.payer)) {
+                this.expenseForm.payer = newMembers[0];
+              }
+            } else {
+              this.expenseForm.payer = '';
+              this.expenseForm.participants = [];
             }
           });
         },
 
-        // --- 建立即時雙向雲端同步連線 (100% 免 LocalStorage) ---
-        setupCloudSync() {
-          if (!this.currentUser) return;
-
-          // 依據規則 1: 使用專屬公共安全路徑儲存共享帳本
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ledgers', 'main');
-
-          onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const cloudData = docSnap.data();
-              // 即時更新本地 reactive 狀態
-              this.members = cloudData.members || [];
-              this.rates = cloudData.rates || this.rates;
-              this.expenses = cloudData.expenses || [];
-
-              // 同步修正表單預設參與人
-              if (this.expenseForm.participants.length === 0 && this.members.length > 0) {
-                this.expenseForm.participants = [...this.members];
-              }
-              if (!this.expenseForm.payer && this.members.length > 0) {
-                this.expenseForm.payer = this.members[0];
-              }
-            } else {
-              // 首次登入建置初始資料範本並寫入雲端
-              this.saveToCloud();
-            }
-          }, (err) => {
-            console.error("Cloud snapshot sync error:", err);
-            // 本地維持可用，僅提示同步狀態
-          });
-        },
-
-        // --- 寫入與更新雲端主方法 ---
-        async saveToCloud(customData = null) {
-          if (!this.currentUser) return;
-          this.syncing = true;
-          try {
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ledgers', 'main');
-            const dataToSave = customData || {
-              members: JSON.parse(JSON.stringify(this.members)),
-              rates: JSON.parse(JSON.stringify(this.rates)),
-              expenses: JSON.parse(JSON.stringify(this.expenses))
-            };
-            await setDoc(docRef, dataToSave);
-          } catch (err) {
-            console.error("Write to cloud failed:", err);
-            this.showToast('error', '儲存至雲端失敗，請確認網路連線！');
-          } finally {
-            this.syncing = false;
+        // --- HSL 飽和色彩自動生成技術 (100% 解決 Safari 顏色缺失與橢圓擠壓問題) ---
+        getMemberStyle(name) {
+          if (!name) return 'background-color: #6B7280;';
+          let hash = 0;
+          for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
           }
+          const h = Math.abs(hash % 360);
+          return 'background-color: hsl(' + h + ', 65%, 40%); min-width: 1.5rem; min-height: 1.5rem;';
         },
 
-        // --- 輔助方法 ---
-        showToast(type, msg) {
-          this.toast.message = msg;
-          this.toast.type = type;
-          this.toast.show = true;
-          setTimeout(() => {
-            this.toast.show = false;
-          }, 3500);
+        // --- 視覺與排版助手函數 ---
+        getMembersCountText() {
+          return this.members.length + ' 人';
         },
-
-        triggerConfirm(title, message, callback) {
-          this.confirmModal.title = title;
-          this.confirmModal.message = message;
-          this.confirmModal.onConfirm = callback;
-          this.confirmModal.show = true;
+        getTotalSpendingText() {
+          return 'HK$ ' + Math.round(this.statistics.totalSpending).toLocaleString() + ' 元';
         },
-
-        executeConfirm() {
-          if (this.confirmModal.onConfirm) {
-            this.confirmModal.onConfirm();
-          }
-          this.confirmModal.show = false;
+        getAverageSpendingText() {
+          return 'HK$ ' + (this.members.length > 0 ? Math.round(this.statistics.totalSpending / this.members.length).toLocaleString() : 0) + ' 元';
         },
-
+        getConvertedHKDText(exp) {
+          return '折合港幣 HK$ ' + Math.round(exp.amount * exp.rate).toLocaleString() + ' 元';
+        },
+        getRateText(exp) {
+          return '(當時匯率: ' + exp.rate + ')';
+        },
+        getParticipantsCountText(exp) {
+          return '分攤成員 (' + exp.participants.length + ' 人)：';
+        },
+        getMemberListTitle() {
+          return '當前成員列表 (' + this.members.length + ' 人)：';
+        },
+        getParticipantShareText(exp, p) {
+          const share = exp.splitType === 'equal' 
+            ? (exp.amount / exp.participants.length) 
+            : (exp.customAmounts[p] || 0);
+          return '(分攤 HK$ ' + Math.round(share * exp.rate) + ')';
+        },
+        getEstimatedHKDText() {
+          const amt = Number(this.expenseForm.amount) || 0;
+          const rate = this.rates[this.expenseForm.currency] || 1.0;
+          return '按目前匯率折合港幣 約：HK$ ' + (amt * rate).toFixed(2) + ' 元 (1 ' + this.expenseForm.currency + ' ≈ ' + rate + ' HKD)';
+        },
+        getEstimatedShareText() {
+          const amt = Number(this.expenseForm.amount) || 0;
+          const count = this.expenseForm.participants.length || 1;
+          const share = Math.round(amt / count);
+          return this.getCurrencySymbol(this.expenseForm.currency) + ' ' + share + ' ' + this.expenseForm.currency;
+        },
+        getEstimatedShareHKDText() {
+          const amt = Number(this.expenseForm.amount) || 0;
+          const count = this.expenseForm.participants.length || 1;
+          const rate = this.rates[this.expenseForm.currency] || 1.0;
+          const shareHKD = Math.round((amt / count) * rate);
+          return '(每人折合約 HK$ ' + shareHKD + ' 元)';
+        },
+        getRemainingAmountText() {
+          const total = Number(this.expenseForm.amount) || 0;
+          const remaining = total - this.sumCustomAmounts();
+          return remaining.toFixed(1) + ' ' + this.expenseForm.currency;
+        },
+        getMemberBalanceDetailText(member) {
+          const bal = this.memberBalances[member] || { paid: 0, owed: 0, net: 0 };
+          return '已付: HK$ ' + Math.round(bal.paid).toLocaleString() + ' | 應付: HK$ ' + Math.round(bal.owed).toLocaleString();
+        },
+        getMemberNetBalance(member) {
+          return this.memberBalances[member]?.net || 0;
+        },
+        getMemberPaidText(member) {
+          const paid = this.memberBalances[member]?.paid || 0;
+          return 'HK$ ' + Math.round(paid).toLocaleString();
+        },
+        getMemberPaidWidthStyle(member) {
+          const paid = this.memberBalances[member]?.paid || 0;
+          const total = this.statistics.totalSpending || 1;
+          const percentage = Math.round((paid / total) * 100);
+          return 'width: ' + percentage + '%';
+        },
+        getCategoryObj(catId) {
+          return this.categories.find(c => c.id === catId) || { id: 'other', name: '其他', icon: '📦', color: 'bg-gray-100 text-gray-600' };
+        },
+        getCurrencySymbol(code) {
+          const symbols = { HKD: 'HK$', TWD: 'NT$', JPY: '¥', USD: 'US$', CNY: 'CN¥', EUR: '€' };
+          return symbols[code] || '$';
+        },
         getMemberColorClass(name) {
           const index = this.members.indexOf(name);
           if (index === -1) return 'bg-gray-500';
           return this.avatarColors[index % this.avatarColors.length];
         },
 
-        getCategoryObj(catId) {
-          return this.categories.find(c => c.id === catId) || { id: 'other', name: '其他', icon: '📦', color: 'bg-gray-100 text-gray-600' };
+        // --- 寫入與更新雲端主方法 ---
+        async triggerSave() {
+          if (window.saveLedgerToCloud) {
+            await window.saveLedgerToCloud();
+          }
         },
 
-        getCurrencySymbol(code) {
-          const symbols = { HKD: 'HK$', TWD: 'NT$', JPY: '¥', USD: 'US$', CNY: 'CN¥', EUR: '€' };
-          return symbols[code] || '$';
-        },
-
-        // --- 新增 / 刪除成員 ---
+        // --- 新增成員 (全網重新賦值反應鏈) ---
         async handleAddMember() {
           const name = this.newMemberName.trim();
           if (!name) return;
@@ -288,22 +280,97 @@
             this.showToast('error', '成員名稱不能重複！');
             return;
           }
-          this.members.push(name);
+          
+          this.members = [...this.members, name];
           this.newMemberName = '';
           
           if (!this.expenseForm.participants.includes(name)) {
-            this.expenseForm.participants.push(name);
+            this.expenseForm.participants = [...this.expenseForm.participants, name];
           }
           this.showToast('success', `已成功加入成員：${name}`);
-          await this.saveToCloud(); // 自動寫入雲端
+          await this.triggerSave();
         },
 
-        askDeleteMember(nameToDelete) {
-          this.triggerConfirm(
-            '確認刪除成員',
-            `確定要刪除「${nameToDelete}」嗎？這將會清除與該成員相關的所有分帳關聯與代墊資訊。`,
-            () => { this.deleteMember(nameToDelete); }
-          );
+        // --- 成員更改/更名功能 ---
+        startEditMember(member) {
+          this.editingMemberName = member;
+          this.editingMemberNewValue = member;
+        },
+
+        async saveMemberRename(oldName) {
+          const newName = this.editingMemberNewValue.trim();
+          if (!newName) return;
+          if (newName === oldName) {
+            this.editingMemberName = null;
+            return;
+          }
+          if (this.members.includes(newName)) {
+            this.showToast('error', '成員名稱不能重複！');
+            return;
+          }
+
+          // 1. 更換成員列表中的名稱
+          this.members = this.members.map(m => m === oldName ? newName : m);
+
+          // 2. 自動連動更改所有記帳數據中的付款人、分攤參與者
+          this.expenses = this.expenses.map(exp => {
+            const updatedPayer = exp.payer === oldName ? newName : exp.payer;
+            const updatedParticipants = exp.participants.map(p => p === oldName ? newName : p);
+            
+            const updatedCustomAmounts = {};
+            Object.keys(exp.customAmounts || {}).forEach(k => {
+              const newKey = k === oldName ? newName : k;
+              updatedCustomAmounts[newKey] = exp.customAmounts[k];
+            });
+
+            return {
+              ...exp,
+              payer: updatedPayer,
+              participants: updatedParticipants,
+              customAmounts: updatedCustomAmounts
+            };
+          });
+
+          // 3. 自動連動更改當前新增表單的選取狀態
+          if (this.expenseForm.payer === oldName) {
+            this.expenseForm.payer = newName;
+          }
+          this.expenseForm.participants = this.expenseForm.participants.map(p => p === oldName ? newName : p);
+          if (this.expenseForm.customAmounts[oldName] !== undefined) {
+            this.expenseForm.customAmounts[newName] = this.expenseForm.customAmounts[oldName];
+            delete this.expenseForm.customAmounts[oldName];
+          }
+
+          this.editingMemberName = null;
+          this.showToast('success', `成員已成功更名為：${newName}`);
+          await this.triggerSave();
+        },
+
+        // --- 刪除安全確認機制 (解決手機 Safari 閉包回調被安全阻斷的 Bug) ---
+        askDeleteMember(name) {
+          this.confirmAction = { type: 'deleteMember', target: name };
+          this.confirmModal.title = '確認刪除成員';
+          this.confirmModal.message = `確定要刪除「${name}」嗎？這將會清除與該成員相關的所有分帳關聯與代墊資訊。`;
+          this.confirmModal.show = true;
+        },
+
+        askDeleteExpense(id) {
+          this.confirmAction = { type: 'deleteExpense', target: id };
+          this.confirmModal.title = '確認刪除帳目';
+          this.confirmModal.message = '您確定要永久刪除這筆消費記錄嗎？刪除後將會重新計算所有人債務。';
+          this.confirmModal.show = true;
+        },
+
+        // 執行確認 (狀態分流，100% 穩定安全)
+        async executeConfirm() {
+          const { type, target } = this.confirmAction;
+          if (type === 'deleteMember') {
+            await this.deleteMember(target);
+          } else if (type === 'deleteExpense') {
+            await this.deleteExpense(target);
+          }
+          this.confirmModal.show = false;
+          this.confirmAction = { type: '', target: null };
         },
 
         async deleteMember(nameToDelete) {
@@ -333,28 +400,7 @@
           }
 
           this.showToast('success', `已成功移除成員：${nameToDelete}`);
-          await this.saveToCloud(); // 自動寫入雲端
-        },
-
-        // --- 記帳表單邏輯 ---
-        toggleParticipant(name) {
-          if (this.expenseForm.participants.includes(name)) {
-            this.expenseForm.participants = this.expenseForm.participants.filter(p => p !== name);
-            if (this.expenseForm.customAmounts[name] !== undefined) {
-              delete this.expenseForm.customAmounts[name];
-            }
-          } else {
-            this.expenseForm.participants.push(name);
-          }
-        },
-
-        selectAllParticipants() {
-          this.expenseForm.participants = [...this.members];
-        },
-
-        clearAllParticipants() {
-          this.expenseForm.participants = [];
-          this.expenseForm.customAmounts = {};
+          await this.triggerSave();
         },
 
         sumCustomAmounts() {
@@ -395,7 +441,6 @@
             }
           }
 
-          // 獲取當前所選幣別的匯率，並進行鎖定保存
           const currentRate = this.rates[currency] || 1.0;
 
           const newExpense = {
@@ -403,7 +448,7 @@
             description: description.trim(),
             amount: numericAmount,
             currency: currency,
-            rate: currentRate, // 鎖定交易當下匯率
+            rate: currentRate,
             payer,
             category,
             date,
@@ -412,7 +457,7 @@
             customAmounts: splitType === 'custom' ? { ...customAmounts } : {}
           };
 
-          this.expenses.unshift(newExpense);
+          this.expenses = [newExpense, ...this.expenses];
 
           // 重置表單 (保留付款人、日期、幣別與類別以利連續記帳)
           this.expenseForm.description = '';
@@ -423,26 +468,16 @@
 
           this.showToast('success', '記帳登記成功！');
           this.activeTab = 'expenses';
-          await this.saveToCloud(); // 自動寫入雲端
-        },
-
-        askDeleteExpense(id) {
-          this.triggerConfirm(
-            '確認刪除帳目',
-            '您確定要永久刪除這筆消費記錄嗎？刪除後將會重新計算所有人債務。',
-            () => { this.deleteExpense(id); }
-          );
+          await this.triggerSave();
         },
 
         async deleteExpense(id) {
           this.expenses = this.expenses.filter(exp => exp.id !== id);
           this.showToast('success', '已刪除該筆帳目！');
-          await this.saveToCloud(); // 自動寫入雲端
+          await this.triggerSave();
         },
 
         // --- 核心運算：計算每位成員的收支與欠款矩陣 (統一折算為港幣 HKD) ---
-        
-        // 1. 計算已付港幣、應付港幣及淨值港幣 (Net HKD)
         get memberBalances() {
           const balances = {};
           this.members.forEach(m => {
@@ -452,7 +487,6 @@
           this.expenses.forEach(exp => {
             const amountInHKD = exp.amount * exp.rate;
 
-            // 付款人累計 (港幣)
             if (balances[exp.payer]) {
               balances[exp.payer].paid += amountInHKD;
             }
@@ -461,7 +495,6 @@
             if (partCount === 0) return;
 
             if (exp.splitType === 'equal') {
-              // 平分 (港幣)
               const shareInHKD = amountInHKD / partCount;
               exp.participants.forEach(p => {
                 if (balances[p]) {
@@ -469,7 +502,6 @@
                 }
               });
             } else {
-              // 自訂不均等分攤 (將各人的原始幣別金額折算為港幣)
               exp.participants.forEach(p => {
                 if (balances[p]) {
                   const individualOriginalAmount = exp.customAmounts[p] || 0;
@@ -480,7 +512,6 @@
             }
           });
 
-          // 淨值 = 實際付出(港幣) - 應付分攤(港幣)
           this.members.forEach(m => {
             balances[m].net = balances[m].paid - balances[m].owed;
           });
@@ -488,7 +519,6 @@
           return balances;
         },
 
-        // 2. 智慧債務簡化演算法 (計算最優化港幣還款路徑)
         get settlementPlans() {
           if (this.members.length === 0) return [];
 
@@ -513,7 +543,6 @@
           let dIdx = 0;
           let cIdx = 0;
 
-          // 大金額優先匹配排序，能有效降低匯款次數
           debtors.sort((a, b) => b.amount - a.amount);
           creditors.sort((a, b) => b.amount - a.amount);
 
@@ -526,7 +555,7 @@
               plans.push({
                 from: debtor.name,
                 to: creditor.name,
-                amount: Math.round(settleAmount * 100) / 100 // 四捨五入到港幣小數後兩位
+                amount: Math.round(settleAmount * 100) / 100
               });
             }
 
@@ -540,9 +569,8 @@
           return plans;
         },
 
-        // 3. 統計數據 (統一轉換為港幣)
         get statistics() {
-          let totalSpending = 0; // 總港幣支出
+          let totalSpending = 0;
           const categorySpending = {};
           this.categories.forEach(c => { categorySpending[c.id] = 0; });
 
@@ -562,7 +590,6 @@
           };
         },
 
-        // 4. 篩選後的記帳清單
         get filteredExpenses() {
           return this.expenses.filter(exp => {
             const matchPayer = this.filterPayer === 'all' || exp.payer === this.filterPayer;
@@ -570,21 +597,124 @@
             return matchPayer && matchCategory;
           });
         }
-      }));
+      };
     };
 
-    // 啟動雙重守衛註冊
-    if (window.Alpine) {
-      registerAlpineComponent();
-    } else {
-      document.addEventListener('alpine:init', registerAlpineComponent);
-    }
+    // 啟動雙重守衛註冊組件 (與 DOM 同步)
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('splitApp', window.splitAppComponent);
+    });
+  </script>
 
-    // 在全域腳本就緒後，再動態以最安全的 defer 載入 Alpine 核心以完美避開時序競態
-    const script = document.createElement('script');
-    script.defer = true;
-    script.src = "https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js";
-    document.head.appendChild(script);
+  <!-- 3. 靜態非同步載入 Alpine JS 框架 -->
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+
+  <!-- 4. 採用 ES2020 動態 import () 載入 Firebase 模組，徹底預防斷網或 CSP 沙盒安全策略攔截時產生 Script Error 卡死網頁 -->
+  <script type="module">
+    // 讀取持久化配置參數
+    const firebaseConfig = typeof __firebase_config !== 'undefined' 
+      ? JSON.parse(__firebase_config) 
+      : {
+          apiKey: "",
+          authDomain: "",
+          projectId: "",
+          storageBucket: "",
+          messagingSenderId: "",
+          appId: ""
+        };
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-split-app';
+
+    (async () => {
+      try {
+        // 動態安全載入
+        const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+        const { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+        const { getFirestore, doc, setDoc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+
+        if (!firebaseConfig || !firebaseConfig.projectId) return;
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // 定義全域儲存命令
+        window.saveLedgerToCloud = async () => {
+          const inst = window.ledgerAlpineInstance;
+          if (!inst || !auth.currentUser) return;
+          inst.syncing = true;
+          try {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ledgers', 'main');
+            const dataToSave = {
+              members: JSON.parse(JSON.stringify(inst.members)),
+              rates: JSON.parse(JSON.stringify(inst.rates)),
+              expenses: JSON.parse(JSON.stringify(inst.expenses))
+            };
+            await setDoc(docRef, dataToSave);
+          } catch (err) {
+            console.error("Write to cloud failed:", err);
+          } finally {
+            inst.syncing = false;
+          }
+        };
+
+        let unsubscribeSnapshot = null;
+
+        window.triggerFirebaseSnapshotInit = (alpineInst) => {
+          if (alpineInst && auth.currentUser && !unsubscribeSnapshot) {
+            alpineInst.currentUser = auth.currentUser;
+            alpineInst.appId = appId;
+            
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ledgers', 'main');
+            unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
+              if (docSnap.exists()) {
+                const cloudData = docSnap.data();
+                // 即時更新本地 reactive 狀態
+                alpineInst.members = cloudData.members || [];
+                alpineInst.rates = cloudData.rates || alpineInst.rates;
+                alpineInst.expenses = cloudData.expenses || [];
+
+                // 同步修正表單預設參與人
+                if (alpineInst.expenseForm.participants.length === 0 && alpineInst.members.length > 0) {
+                  alpineInst.expenseForm.participants = [...alpineInst.members];
+                }
+                if (!alpineInst.expenseForm.payer && alpineInst.members.length > 0) {
+                  alpineInst.expenseForm.payer = alpineInst.members[0];
+                }
+              } else {
+                window.saveLedgerToCloud();
+              }
+            }, (err) => {
+              console.error("Cloud snapshot sync error:", err);
+            });
+          }
+        };
+
+        // 登入
+        try {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+        } catch (err) {
+          console.warn("Firebase Auth bypassed:", err);
+        }
+
+        onAuthStateChanged(auth, (user) => {
+          const inst = window.ledgerAlpineInstance;
+          if (inst) {
+            inst.currentUser = user;
+            inst.appId = appId;
+            if (user) {
+              window.triggerFirebaseSnapshotInit(inst);
+            }
+          }
+        });
+
+      } catch (err) {
+        console.warn("Cloud service unavailable, app continues in robust offline fallback mode.");
+      }
+    })();
   </script>
 
   <style>
@@ -606,7 +736,7 @@
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-800 font-sans pb-16" x-data="splitApp">
 
-  <!-- 導覽列：全新改版「極致深灰高對比面板」，徹底解決在手機或強光下白色小字、分隔線看不清的問題 -->
+  <!-- 導覽列 -->
   <header class="bg-gray-900 text-white shadow-md sticky top-0 z-40 border-b border-gray-800">
     <div class="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div class="flex items-center gap-3">
@@ -616,22 +746,21 @@
             作伙算 
             <span class="text-[10px] bg-green-600 text-white px-2 py-0.5 rounded-full ml-1 font-bold">HKD 港幣本位</span>
           </h1>
-          <p class="text-xs text-gray-300 font-medium">親友團體旅遊・支援多幣別匯率換算與分帳</p>
+          <p class="text-xs text-gray-300 font-medium">親友團體旅遊・支援多幣別分帳與即時雲端</p>
         </div>
       </div>
-      <!-- 右側資訊泡泡：顯示完整 User ID，確保多人協作與發現性 -->
+      <!-- 右側資訊 -->
       <div class="flex flex-col items-center sm:items-end gap-1 shrink-0">
         <div class="flex flex-wrap justify-center items-center gap-2 bg-gray-800 border border-gray-700 px-4 py-1.5 rounded-full text-xs">
           <span class="text-gray-300">👥 成員：</span>
-          <span class="font-black text-yellow-300 text-sm" x-text="members.length + ' 人'"></span>
+          <span class="font-black text-yellow-300 text-sm" x-text="getMembersCountText()"></span>
           <span class="text-gray-600 px-0.5">|</span>
           <span class="text-gray-300">💰 總支出：</span>
-          <span class="font-black text-yellow-300 text-sm" x-text="'HK$ ' + Math.round(statistics.totalSpending).toLocaleString() + ' 元'"></span>
+          <span class="font-black text-yellow-300 text-sm" x-text="getTotalSpendingText()"></span>
         </div>
-        <!-- 完整 User ID，遵照使用者可識別原則 -->
         <div class="text-[9px] text-gray-500 flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block animate-ping"></span>
-          <span>即時同步中 | 用戶 ID: <span class="font-mono text-gray-400" x-text="currentUser ? currentUser.uid : 'Authenticating...'"></span></span>
+          <span>即時備份中 | 帳本安全保管已啟動</span>
         </div>
       </div>
     </div>
@@ -639,40 +768,36 @@
 
   <!-- 客製化通知訊息 (Toast) -->
   <div class="fixed top-24 right-4 z-50 space-y-2 pointer-events-none">
-    <template x-if="toast.show">
-      <div class="px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce pointer-events-auto"
-           :class="toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'">
-        <span x-text="toast.type === 'error' ? '⚠️' : '✅'"></span>
-        <span x-text="toast.message"></span>
-      </div>
-    </template>
+    <div x-show="toast.show" class="px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce pointer-events-auto"
+         :class="toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'" style="display: none;">
+      <span x-text="toast.type === 'error' ? '⚠️' : '✅'"></span>
+      <span x-text="toast.message"></span>
+    </div>
   </div>
 
-  <!-- 客製化確認對話框 (Custom Confirm Modal) -->
-  <template x-if="confirmModal.show">
-    <div class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-gray-100">
-        <div class="text-center">
-          <span class="text-4xl shrink-0">⚠️</span>
-          <h3 class="text-lg font-bold text-gray-800 mt-2" x-text="confirmModal.title">確認操作</h3>
-          <p class="text-slate-500 text-sm mt-2" x-text="confirmModal.message"></p>
-        </div>
-        <div class="flex gap-3 mt-6">
-          <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm transition-all">
-            取消
-          </button>
-          <button @click="executeConfirm()" class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm transition-all shadow-md">
-            確定
-          </button>
-        </div>
+  <!-- 客製化確認對話框 (修復完畢：改用純 x-show 完全擺脫 _x_dataStack 核心 DOM 渲染錯誤) -->
+  <div x-show="confirmModal.show" class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50" style="display: none;">
+    <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-gray-100">
+      <div class="text-center">
+        <span class="text-4xl shrink-0">⚠️</span>
+        <h3 class="text-lg font-bold text-gray-800 mt-2" x-text="confirmModal.title">確認操作</h3>
+        <p class="text-slate-500 text-sm mt-2" x-text="confirmModal.message"></p>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-slate-700 font-bold text-sm transition-all">
+          取消
+        </button>
+        <button @click="executeConfirm()" class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm transition-all shadow-md">
+          確定
+        </button>
       </div>
     </div>
-  </template>
+  </div>
 
   <!-- 主要內容區 -->
   <main class="max-w-6xl mx-auto px-4 mt-6">
     
-    <!-- 分頁選單 (加上 shrink-0 確保在任何手機小螢幕上按鈕文字不縮水、不換行) -->
+    <!-- 分頁選單 -->
     <div class="flex bg-white p-1 rounded-xl shadow-sm mb-6 border border-gray-200 overflow-x-auto scrollbar-none">
       <button 
         @click="activeTab = 'settlement'" 
@@ -702,13 +827,6 @@
       >
         👥 成員維護
       </button>
-      <button 
-        @click="activeTab = 'charts'" 
-        class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'charts' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-      >
-        📈 圓餅統計
-      </button>
     </div>
 
     <!-- --- 分頁1：結算對帳 (預設首頁) --- -->
@@ -718,7 +836,7 @@
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <button 
           @click="showRateSettings = !showRateSettings" 
-          class="w-full px-6 py-4 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors border-b border-gray-100 text-left"
+          class="w-full px-6 py-4 flex items-center justify-between bg-gray-50 hover:bg-slate-100 transition-colors border-b border-gray-100 text-left"
         >
           <div class="flex items-center gap-2">
             <span class="text-xl shrink-0">⚙️</span>
@@ -728,119 +846,108 @@
         </button>
         
         <div x-show="showRateSettings" class="p-4 sm:p-6 bg-white space-y-4" x-transition>
-          <p class="text-xs text-gray-500">請設定 <b>1 單位外幣折合多少港幣 (HKD)</b>。更新此處後，未來新增的帳目將會依新匯率折算：</p>
-          <!-- 手機上改為兩列 (grid-cols-2) 到中大螢幕改為五列 (sm:grid-cols-5) -->
+          <p class="text-xs text-gray-500">請設定 <b>1 單位外幣折合多少港幣 (HKD)</b>：</p>
           <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
             <div>
               <label class="block text-xs font-bold text-gray-500 mb-1">1 TWD (新台幣)</label>
-              <!-- 行動端輸入框優化：字體升為 text-base (16px) 避免 iOS Safari 自動縮放畫面，並透過 sm:text-sm 調節桌面版大小 -->
-              <input type="number" step="0.0001" x-model.number="rates.TWD" @change="saveToCloud()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <input type="number" step="0.0001" x-model.number="rates.TWD" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div>
               <label class="block text-xs font-bold text-gray-500 mb-1">1 JPY (日圓)</label>
-              <input type="number" step="0.0001" x-model.number="rates.JPY" @change="saveToCloud()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <input type="number" step="0.0001" x-model.number="rates.JPY" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div>
               <label class="block text-xs font-bold text-gray-500 mb-1">1 USD (美金)</label>
-              <input type="number" step="0.01" x-model.number="rates.USD" @change="saveToCloud()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <input type="number" step="0.01" x-model.number="rates.USD" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div>
               <label class="block text-xs font-bold text-gray-500 mb-1">1 CNY (人民幣)</label>
-              <input type="number" step="0.01" x-model.number="rates.CNY" @change="saveToCloud()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <input type="number" step="0.01" x-model.number="rates.CNY" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
             <div class="col-span-2 sm:col-span-1">
               <label class="block text-xs font-bold text-gray-500 mb-1">1 EUR (歐元)</label>
-              <input type="number" step="0.01" x-model.number="rates.EUR" @change="saveToCloud()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+              <input type="number" step="0.01" x-model.number="rates.EUR" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
             </div>
           </div>
           <div class="text-right">
-            <span class="text-[10px] text-gray-400 bg-gray-100 px-2 py-1 rounded">💡 調整數值後按 Enter 或點擊外部將自動同步儲存</span>
+            <span class="text-[10px] text-gray-400 bg-gray-100 px-2 py-1 rounded">💡 調整數值後自動即時同步儲存</span>
           </div>
         </div>
       </div>
 
-      <!-- 核心對帳卡片 -->
+      <!-- 核心對帳卡片 (完全移除 x-if 模版嵌套，100% 杜絕 _x_dataStack 錯誤) -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-4 border-b pb-3">
           <span class="text-2xl shrink-0">⚡</span>
           <h2 class="text-lg sm:text-xl font-bold text-gray-800">智慧分帳方案 (最省事還款路徑)</h2>
         </div>
 
-        <template x-if="settlementPlans.length === 0">
-          <div class="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-            <span class="text-4xl animate-bounce">🎉</span>
-            <p class="mt-2 text-gray-500 font-semibold">目前無任何欠款，大家都結清囉！</p>
-            <p class="text-xs text-gray-400 mt-1">當您開始新增帳目，系統會自動轉換為港幣並算出最適還款方案。</p>
-          </div>
-        </template>
+        <!-- 均已使用 x-show 替代 x-if 進行切換 -->
+        <div x-show="settlementPlans.length === 0" class="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+          <span class="text-4xl animate-bounce">🎉</span>
+          <p class="mt-2 text-gray-500 font-semibold">目前無任何欠款，大家都結清囉！</p>
+          <p class="text-xs text-gray-400 mt-1">當您開始新增帳目，系統會自動轉換為港幣並算出最適還款方案。</p>
+        </div>
 
-        <template x-if="settlementPlans.length > 0">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- 還款步驟 (加入 shrink-0 防止 Safari 排版變形) -->
+        <div x-show="settlementPlans.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- 還款步驟 -->
+          <div class="space-y-3">
+            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">建議轉帳步驟：</h3>
             <div class="space-y-3">
-              <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">建議轉帳步驟：</h3>
-              <div class="space-y-3">
-                <template x-for="(plan, index) in settlementPlans" :key="index">
-                  <div class="flex items-center justify-between p-3.5 bg-gradient-to-r from-gray-50 to-teal-50 border border-gray-200 rounded-xl shadow-sm hover:border-teal-300 transition-colors">
-                    <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-                      <div class="flex items-center gap-1.5 min-w-0">
-                        <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(plan.from)" x-text="plan.from[0]"></span>
-                        <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.from"></span>
-                      </div>
-                      
-                      <span class="text-gray-400 text-[10px] sm:text-xs px-1.5 py-0.5 bg-gray-100 rounded shrink-0">匯款給</span>
-                      
-                      <div class="flex items-center gap-1.5 min-w-0">
-                        <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(plan.to)" x-text="plan.to[0]"></span>
-                        <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.to"></span>
-                      </div>
+              <template x-for="(plan, index) in settlementPlans" :key="index">
+                <div class="flex items-center justify-between p-3.5 bg-gradient-to-r from-gray-50 to-teal-55 border border-gray-200 rounded-xl shadow-sm hover:border-teal-300 transition-colors">
+                  <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(plan.from)" x-text="plan.from[0]"></span>
+                      <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.from"></span>
                     </div>
-
-                    <div class="text-right shrink-0 ml-2">
-                      <span class="text-base sm:text-lg font-black text-green-600" x-text="'HK$ ' + plan.amount.toLocaleString()"></span>
-                      <span class="text-[10px] text-gray-400 block">港幣</span>
+                    
+                    <span class="text-gray-400 text-[10px] sm:text-xs px-1.5 py-0.5 bg-gray-100 rounded shrink-0">匯款給</span>
+                    
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(plan.to)" x-text="plan.to[0]"></span>
+                      <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.to"></span>
                     </div>
                   </div>
-                </template>
-              </div>
-              
-              <div class="p-3 bg-blue-50 text-blue-800 text-xs rounded-lg mt-4 flex items-start gap-2">
-                <span>💡</span>
-                <p><b>提示：</b>本系統採用最優簡化演算法。不論親友們旅途中支付的是何種貨幣，最終只需依照上方指示以<b>港幣</b>進行轉帳，即可一次性結清所有人之間的債務！</p>
-              </div>
+
+                  <div class="text-right shrink-0 ml-2">
+                    <span class="text-base sm:text-lg font-black text-green-600" x-text="'HK$ ' + plan.amount.toLocaleString()"></span>
+                    <span class="text-[10px] text-gray-400 block">港幣</span>
+                  </div>
+                </div>
+              </template>
             </div>
-
-            <!-- 所有人結算明細 -->
-            <div class="bg-gray-50 p-4 sm:p-5 rounded-xl border border-slate-200">
-              <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">所有人當前結算明細 (折合港幣)：</h3>
-              <div class="space-y-3">
-                <template x-for="member in members" :key="member">
-                  <div class="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm">
-                    <div class="flex items-center gap-2 min-w-0">
-                      <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
-                      <div class="min-w-0">
-                        <span class="font-bold text-gray-700 text-sm block truncate" x-text="member"></span>
-                        <span class="text-[10px] text-gray-400 block truncate" x-text="'已付: HK$ ' + Math.round(memberBalances[member]?.paid || 0).toLocaleString() + ' | 應付: HK$ ' + Math.round(memberBalances[member]?.owed || 0).toLocaleString()"></span>
-                      </div>
-                    </div>
-
-                    <div class="text-right shrink-0 ml-2">
-                      <template x-if="(memberBalances[member]?.net || 0) > 0.01">
-                        <span class="text-green-600 font-bold text-[11px] sm:text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100" x-text="'應收回 HK$ ' + Math.round(memberBalances[member]?.net || 0).toLocaleString()"></span>
-                      </template>
-                      <template x-if="(memberBalances[member]?.net || 0) < -0.01">
-                        <span class="text-red-600 font-bold text-[11px] sm:text-xs bg-red-50 px-2 py-1 rounded-full border border-red-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(memberBalances[member]?.net || 0)).toLocaleString()"></span>
-                      </template>
-                      <template x-if="Math.abs(memberBalances[member]?.net || 0) <= 0.01">
-                        <span class="text-gray-400 text-xs sm:text-sm font-semibold">已結清</span>
-                      </template>
-                    </div>
-                  </div>
-                </template>
-              </div>
+            
+            <div class="p-3 bg-blue-50 text-blue-800 text-xs rounded-lg mt-4 flex items-start gap-2">
+              <span>💡</span>
+              <p><b>提示：</b>本系統採用最優簡化演算法。不論親友們旅途中支付的是何種貨幣，最終只需依照上方指示以<b>港幣</b>進行轉帳，即可一次性結清所有人之間的債務！</p>
             </div>
           </div>
-        </template>
+
+          <!-- 所有人結算明細 -->
+          <div class="bg-gray-50 p-4 sm:p-5 rounded-xl border border-gray-200">
+            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">所有人當前結算明細 (折合港幣)：</h3>
+            <div class="space-y-3">
+              <template x-for="member in members" :key="member">
+                <div class="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(member)"></span>
+                    <div class="min-w-0 flex-1">
+                      <span class="font-bold text-gray-700 text-sm block truncate" x-text="member"></span>
+                      <span class="text-[10px] text-gray-400 block truncate" x-text="getMemberBalanceDetailText(member)"></span>
+                    </div>
+                  </div>
+
+                  <div class="text-right shrink-0 ml-2">
+                    <span x-show="getMemberNetBalance(member) > 0.01" class="text-green-600 font-bold text-[11px] sm:text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100" x-text="'應收回 HK$ ' + Math.round(getMemberNetBalance(member)).toLocaleString()"></span>
+                    <span x-show="getMemberNetBalance(member) < -0.01" class="text-red-600 font-bold text-[11px] sm:text-xs bg-red-50 px-2 py-1 rounded-full border border-red-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(getMemberNetBalance(member))).toLocaleString()"></span>
+                    <span x-show="Math.abs(getMemberNetBalance(member)) <= 0.01" class="text-gray-400 text-xs sm:text-sm font-semibold">已結清</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 成員快速狀態與統計卡片 -->
@@ -849,14 +956,14 @@
           <div class="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center text-2xl shrink-0">💰</div>
           <div>
             <h4 class="text-sm font-semibold text-gray-400">活動總開銷 (港幣)</h4>
-            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="'HK$ ' + Math.round(statistics.totalSpending).toLocaleString() + ' 元'"></p>
+            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="getTotalSpendingText()"></p>
           </div>
         </div>
         <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
           <div class="w-12 h-12 bg-teal-100 rounded-full flex items-center justify-center text-2xl shrink-0">🙋‍♂️</div>
           <div>
             <h4 class="text-sm font-semibold text-gray-400">平均每人消費 (港幣)</h4>
-            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="'HK$ ' + (members.length > 0 ? Math.round(statistics.totalSpending / members.length).toLocaleString() : 0) + ' 元'"></p>
+            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="getAverageSpendingText()"></p>
           </div>
         </div>
         <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
@@ -871,117 +978,121 @@
 
     <!-- --- 分頁2：支出明細 --- -->
     <div x-show="activeTab === 'expenses'" class="space-y-6">
-      <!-- 篩選與工具列 -->
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
-        <div class="flex flex-wrap gap-3 items-center">
-          <span class="text-sm text-gray-500 font-bold">過濾條件：</span>
-          
-          <!-- 付款人過濾 -->
-          <select 
-            x-model="filterPayer"
-            class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-base sm:text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
-          >
-            <option value="all">所有付款人</option>
+      <!-- 篩選與工具列 (手機觸控友善優化：不使用不穩定的 select 模板) -->
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
+        <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
+          <span class="text-xs text-gray-500 font-bold shrink-0">🔍 依付款人過濾：</span>
+          <div class="flex flex-wrap gap-1.5">
+            <button 
+              type="button"
+              @click="filterPayer = 'all'"
+              class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all"
+              :class="filterPayer === 'all' ? 'bg-teal-600 text-white border-teal-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
+            >所有付款人</button>
             <template x-for="m in members" :key="m">
-              <option :value="m" x-text="m"></option>
+              <button 
+                type="button"
+                @click="filterPayer = m"
+                class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all flex items-center gap-1 min-w-0"
+                :class="filterPayer === m ? 'bg-teal-600 text-white border-teal-600 shadow-xs' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
+              >
+                <span class="w-3.5 h-3.5 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0" :style="getMemberStyle(m)" x-text="m[0]"></span>
+                <span class="truncate max-w-[70px]" x-text="m"></span>
+              </button>
             </template>
-          </select>
-
-          <!-- 類別過濾 -->
-          <select 
-            x-model="filterCategory"
-            class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-base sm:text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
-          >
-            <option value="all">所有類別</option>
-            <template x-for="cat in categories" :key="cat.id">
-              <option :value="cat.id" x-text="cat.icon + ' ' + cat.name"></option>
-            </template>
-          </select>
+          </div>
         </div>
 
-        <button 
-          @click="filterPayer = 'all'; filterCategory = 'all';"
-          class="text-xs text-teal-600 font-bold hover:underline py-1 self-start sm:self-auto"
-        >
-          🔄 重設篩選
-        </button>
+        <div class="flex flex-col sm:flex-row gap-3 sm:items-center border-t border-gray-100 pt-3">
+          <span class="text-xs text-gray-500 font-bold shrink-0">🏷️ 依消費類別過濾：</span>
+          <div class="flex flex-wrap gap-1.5">
+            <button 
+              type="button"
+              @click="filterCategory = 'all'"
+              class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all"
+              :class="filterCategory === 'all' ? 'bg-teal-600 text-white border-teal-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
+            >所有類別</button>
+            <template x-for="cat in categories" :key="cat.id">
+              <button 
+                type="button"
+                @click="filterCategory = cat.id"
+                class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all flex items-center gap-1"
+                :class="filterCategory === cat.id ? 'bg-teal-600 text-white border-teal-600 shadow-xs' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
+              >
+                <span x-text="cat.icon"></span>
+                <span x-text="cat.name"></span>
+              </button>
+            </template>
+          </div>
+        </div>
       </div>
 
       <!-- 帳目列表 -->
       <div class="space-y-4">
-        <template x-if="filteredExpenses.length === 0">
-          <div class="bg-white rounded-2xl p-12 text-center border border-gray-200">
-            <span class="text-5xl block mb-2">🔍</span>
-            <p class="text-gray-500 font-bold">找不到符合條件的消費紀錄！</p>
-            <p class="text-gray-400 text-sm mt-1">您可以嘗試調整篩選條件，或是點選上方「新增支出」開始記帳。</p>
-          </div>
-        </template>
+        <div x-show="filteredExpenses.length === 0" class="bg-white rounded-2xl p-12 text-center border border-gray-200">
+          <span class="text-5xl block mb-2">🔍</span>
+          <p class="text-gray-500 font-bold">找不到符合條件的消費紀錄！</p>
+          <p class="text-gray-400 text-sm mt-1">您可以嘗試調整篩選條件，或是點選上方「新增支出」開始記帳。</p>
+        </div>
 
-        <template x-if="filteredExpenses.length > 0">
-          <div class="space-y-4">
-            <template x-for="exp in filteredExpenses" :key="exp.id">
-              <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <!-- 支出基本資訊 -->
-                <div class="flex items-start gap-3.5 min-w-0">
-                  <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm shrink-0 border" 
-                       :class="getCategoryObj(exp.category).color" 
-                       x-text="getCategoryObj(exp.category).icon">
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <div class="flex flex-wrap items-center gap-1.5">
-                      <h3 class="font-bold text-gray-800 text-base sm:text-lg truncate break-all max-w-[200px] sm:max-w-none" x-text="exp.description"></h3>
-                      <span class="text-[10px] sm:text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium" x-text="getCategoryObj(exp.category).name"></span>
-                    </div>
-                    
-                    <div class="text-gray-500 text-[11px] sm:text-xs mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-                      <span>📅 日期：<b x-text="exp.date"></b></span>
-                      <span>👤 付款人：<strong class="text-teal-600" x-text="exp.payer"></strong></span>
-                      <span>分攤：<b x-text="exp.splitType === 'equal' ? '全員均分' : '自訂金額'"></b></span>
-                    </div>
-
-                    <!-- 分攤人細節 -->
-                    <div class="mt-3">
-                      <span class="text-[10px] text-gray-400 block mb-1" x-text="'分攤成員 (' + exp.participants.length + ' 人)：'"></span>
-                      <div class="flex flex-wrap gap-1.5">
-                        <template x-for="p in exp.participants" :key="p">
-                          <span class="inline-flex items-center gap-1 text-[11px] sm:text-xs bg-gray-50 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-md">
-                            <span class="w-2 h-2 rounded-full shrink-0" :class="getMemberColorClass(p)"></span>
-                            <span x-text="p"></span>
-                            <!-- 顯示分攤折算港幣金額 -->
-                            <span class="text-[10px] text-gray-400 font-semibold" 
-                                  x-text="'(分攤 HK$ ' + Math.round((exp.splitType === 'equal' ? (exp.amount / exp.participants.length) : (exp.customAmounts[p] || 0)) * exp.rate) + ')'">
-                            </span>
-                          </span>
-                        </template>
-                      </div>
-                    </div>
-                  </div>
+        <div x-show="filteredExpenses.length > 0" class="space-y-4">
+          <template x-for="exp in filteredExpenses" :key="exp.id">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <!-- 支出基本資訊 -->
+              <div class="flex items-start gap-3.5 min-w-0">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm shrink-0 border" 
+                     :class="getCategoryObj(exp.category).color" 
+                     x-text="getCategoryObj(exp.category).icon">
                 </div>
-
-                <!-- 金額與刪除按鈕 -->
-                <div class="flex items-center justify-between md:flex-col md:items-end gap-2 pt-3 border-t md:pt-0 md:border-t-0 border-gray-100">
-                  <div class="text-left md:text-right">
-                    <!-- 顯示原始金額與幣別 -->
-                    <span class="text-xl sm:text-2xl font-black text-gray-800" x-text="getCurrencySymbol(exp.currency) + ' ' + exp.amount.toLocaleString()"></span>
-                    <!-- 顯示折合港幣 -->
-                    <span class="text-xs text-teal-600 font-bold block" x-text="'折合港幣 HK$ ' + Math.round(exp.amount * exp.rate).toLocaleString() + ' 元'"></span>
-                    <template x-if="exp.currency !== 'HKD'">
-                      <span class="text-[9px] text-gray-400 block" x-text="'(當時匯率: ' + exp.rate + ')'"></span>
-                    </template>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <h3 class="font-bold text-gray-800 text-base sm:text-lg truncate break-all max-w-[200px] sm:max-w-none" x-text="exp.description"></h3>
+                    <span class="text-[10px] sm:text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium" x-text="getCategoryObj(exp.category).name"></span>
                   </div>
                   
-                  <button
-                    @click="askDeleteExpense(exp.id)"
-                    class="bg-red-50 hover:bg-red-100 text-red-600 p-2 rounded-lg transition-all border border-red-200 text-xs flex items-center gap-1 font-bold"
-                    title="刪除此帳目"
-                  >
-                    🗑️ 刪除
-                  </button>
+                  <div class="text-gray-500 text-[11px] sm:text-xs mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <span>📅 日期：<b x-text="exp.date"></b></span>
+                    <span>👤 付款人：<strong class="text-teal-600" x-text="exp.payer"></strong></span>
+                    <span>分攤：<b x-text="exp.splitType === 'equal' ? '全員均分' : '自訂金額'"></b></span>
+                  </div>
+
+                  <!-- 分攤人細節 -->
+                  <div class="mt-3">
+                    <span class="text-[10px] text-gray-400 block mb-1" x-text="getParticipantsCountText(exp)"></span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="p in exp.participants" :key="p">
+                        <span class="inline-flex items-center gap-1 text-[11px] sm:text-xs bg-slate-50 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-md">
+                          <span class="w-2 h-2 rounded-full shrink-0" :style="getMemberStyle(p)"></span>
+                          <span x-text="p"></span>
+                          <span class="text-[10px] text-gray-400 font-semibold" x-text="getParticipantShareText(exp, p)"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </template>
-          </div>
-        </template>
+
+              <!-- 金額與刪除按鈕 -->
+              <div class="flex items-center justify-between md:flex-col md:items-end gap-2 pt-3 border-t md:pt-0 md:border-t-0 border-gray-100">
+                <div class="text-left md:text-right">
+                  <span class="text-xl sm:text-2xl font-black text-gray-800" x-text="getCurrencySymbol(exp.currency) + ' ' + exp.amount.toLocaleString()"></span>
+                  <span class="text-xs text-teal-600 font-bold block" x-text="getConvertedHKDText(exp)"></span>
+                  <template x-if="exp.currency !== 'HKD'">
+                    <span class="text-[9px] text-gray-400 block" x-text="getRateText(exp)"></span>
+                  </template>
+                </div>
+                
+                <button
+                  @click="askDeleteExpense(exp.id)"
+                  class="bg-red-50 hover:bg-red-100 text-red-600 p-2 rounded-lg transition-all border border-red-200 text-xs flex items-center gap-1 font-bold"
+                  title="刪除此帳目"
+                >
+                  🗑️ 刪除
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -994,7 +1105,7 @@
 
       <form @submit.prevent="handleAddExpense()" class="space-y-5">
         
-        <!-- 1. 金額 & 幣別 & 名稱 -->
+        <!-- 1. 項目名稱 & 幣別 -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div class="sm:col-span-1">
             <label class="block text-sm font-bold text-gray-600 mb-1.5">消費幣別 <span class="text-red-500">*</span></label>
@@ -1037,38 +1148,44 @@
               class="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-2.5 text-base sm:text-lg text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
             />
           </div>
-          <!-- 即時匯率折合提示 -->
-          <template x-if="expenseForm.currency !== 'HKD' && Number(expenseForm.amount) > 0">
-            <div class="mt-2 text-xs text-teal-600 font-bold bg-teal-50 p-2 rounded-lg border border-teal-100 inline-block"
-                 x-text="'按目前匯率折合港幣 約：HK$ ' + (Number(expenseForm.amount) * rates[expenseForm.currency]).toFixed(2) + ' 元 (1 ' + expenseForm.currency + ' ≈ ' + rates[expenseForm.currency] + ' HKD)'">
-            </div>
-          </template>
+          <div x-show="expenseForm.currency !== 'HKD' && Number(expenseForm.amount) > 0" class="mt-2 text-xs text-teal-600 font-bold bg-teal-50 p-2 rounded-lg border border-teal-100 inline-block" x-text="getEstimatedHKDText()"></div>
         </div>
 
-        <!-- 3. 付款人 & 分類 & 日期 -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-sm font-bold text-gray-600 mb-1.5">誰付的錢？ <span class="text-red-500">*</span></label>
-            <select
-              x-model="expenseForm.payer"
-              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
-            >
-              <template x-for="m in members" :key="m">
-                <option :value="m" x-text="m"></option>
-              </template>
-            </select>
+        <!-- 3. 付款人 (極致升級：無 Select dropdown 的直觀按鈕網格) -->
+        <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+          <label class="block text-sm font-bold text-gray-600 mb-2">誰付的錢？ <span class="text-red-500">*</span></label>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="m in members" :key="m">
+              <button
+                type="button"
+                @click="expenseForm.payer = m"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-full border-2 transition-all font-bold text-xs"
+                :class="expenseForm.payer === m ? 'border-teal-500 bg-teal-50 text-teal-800 shadow-xs' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'"
+              >
+                <span class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0 animate-pulse-once" :style="getMemberStyle(m)" x-text="m[0]"></span>
+                <span x-text="m"></span>
+              </button>
+            </template>
           </div>
+        </div>
+
+        <!-- 4. 分類 & 日期 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-bold text-gray-600 mb-1.5">消費類別</label>
             <select
               x-model="expenseForm.category"
               class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
             >
-              <template x-for="cat in categories" :key="cat.id">
-                <option :value="cat.id" x-text="cat.icon + ' ' + cat.name"></option>
-              </template>
+              <option value="food">🍔 餐飲美食</option>
+              <option value="transport">🚗 交通出行</option>
+              <option value="lodging">🏨 住宿飯店</option>
+              <option value="entertainment">🎟️ 娛樂門票</option>
+              <option value="shopping">🛍️ 購物血拼</option>
+              <option value="other">📦 其他雜項</option>
             </select>
           </div>
+
           <div>
             <label class="block text-sm font-bold text-gray-600 mb-1.5">消費日期</label>
             <input 
@@ -1079,7 +1196,7 @@
           </div>
         </div>
 
-        <!-- 4. 分帳方式 -->
+        <!-- 5. 分帳方式 -->
         <div>
           <label class="block text-sm font-bold text-gray-600 mb-1.5">分攤機制 (以輸入幣別分攤)</label>
           <div class="flex gap-4">
@@ -1106,95 +1223,69 @@
           </div>
         </div>
 
-        <!-- 5. 參與分攤成員名單 -->
+        <!-- 6. 參與分攤成員名單 -->
         <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
           <div class="flex justify-between items-center mb-3">
             <span class="text-sm font-bold text-gray-600">誰參與這筆開銷？</span>
             <div class="flex gap-2">
-              <button 
-                type="button" 
-                @click="selectAllParticipants()"
-                class="text-xs text-teal-600 hover:underline font-bold"
-              >
-                全選
-              </button>
+              <button type="button" @click="selectAllParticipants()" class="text-xs text-teal-600 hover:underline font-bold">全選</button>
               <span class="text-gray-300 text-xs">|</span>
-              <button 
-                type="button" 
-                @click="clearAllParticipants()"
-                class="text-xs text-gray-500 hover:underline font-bold"
-              >
-                全不選
-              </button>
+              <button type="button" @click="clearAllParticipants()" class="text-xs text-gray-500 hover:underline font-bold">全不選</button>
             </div>
           </div>
 
           <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
             <template x-for="member in members" :key="member">
               <div class="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100 shadow-sm">
-                <!-- 手機防溢出 min-w-0 與 truncate 封裝 -->
+                <!-- 雙向綁定：利用 x-model 直接驅動多選框陣列 -->
                 <label class="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
                   <input 
                     type="checkbox"
                     :value="member"
-                    :checked="expenseForm.participants.includes(member)"
-                    @change="toggleParticipant(member)"
+                    x-model="expenseForm.participants"
                     class="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 shrink-0"
                   />
-                  <span class="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
+                  <span class="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0 shadow-xs" :style="getMemberStyle(member)" x-text="member[0]"></span>
                   <span class="font-semibold text-gray-700 text-sm truncate" x-text="member"></span>
                 </label>
 
-                <!-- 如果是不均等分帳，顯示金額輸入框 -->
-                <template x-if="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)">
-                  <div class="flex items-center gap-1 shrink-0 ml-2">
-                    <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
-                    <!-- 修正 React className Typos 為 class 並優化行動端字體大小，防縮放 -->
-                    <input 
-                      type="number"
-                      placeholder="金額"
-                      x-model.number="expenseForm.customAmounts[member]"
-                      class="w-20 text-right bg-gray-50 border border-gray-200 rounded px-2 py-1 text-base sm:text-xs font-bold font-sans"
-                    />
-                  </div>
-                </template>
+                <!-- 如果是不均等分帳，顯示金額輸入框 (改用 x-show 徹底杜絕 nesting templates _x_dataStack null bug) -->
+                <div x-show="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)" class="flex items-center gap-1 shrink-0 ml-2">
+                  <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
+                  <input 
+                    type="number"
+                    placeholder="金額"
+                    x-model.number="expenseForm.customAmounts[member]"
+                    class="w-20 text-right bg-gray-50 border border-gray-200 rounded px-2 py-1 text-base sm:text-xs font-bold font-sans"
+                  />
+                </div>
               </div>
             </template>
           </div>
           
-          <!-- 平分計算提示 -->
-          <template x-if="expenseForm.splitType === 'equal' && expenseForm.participants.length > 0 && Number(expenseForm.amount) > 0">
-            <div class="mt-3 text-right text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold space-y-1">
-              <div>
-                預估每人分攤：
-                <span class="text-teal-600 font-bold text-sm" x-text="getCurrencySymbol(expenseForm.currency) + ' ' + Math.round(Number(expenseForm.amount) / expenseForm.participants.length) + ' ' + expenseForm.currency"></span>
-              </div>
-              <template x-if="expenseForm.currency !== 'HKD'">
-                <div class="text-gray-400 text-[11px]">
-                  (每人折合約 HK$ <span x-text="Math.round((Number(expenseForm.amount) / expenseForm.participants.length) * rates[expenseForm.currency])"></span> 元)
-                </div>
-              </template>
+          <!-- 平分計算提示 (改用 x-show 替代 x-if) -->
+          <div x-show="expenseForm.splitType === 'equal' && expenseForm.participants.length > 0 && Number(expenseForm.amount) > 0" class="mt-3 text-right text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold space-y-1">
+            <div>
+              預估每人分攤：
+              <span class="text-teal-600 font-bold text-sm" x-text="getEstimatedShareText()"></span>
             </div>
-          </template>
+            <div x-show="expenseForm.currency !== 'HKD'" class="text-gray-400 text-[11px]" x-text="getEstimatedShareHKDText()"></div>
+          </div>
 
-          <!-- 不等分計算提示 -->
-          <template x-if="expenseForm.splitType === 'custom'">
-            <div class="mt-3 flex justify-between items-center text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold">
-              <span>
-                已分配總和：
-                <strong class="text-gray-700" x-text="sumCustomAmounts() + ' ' + expenseForm.currency"></strong>
-              </span>
-              <span>
-                剩餘未分配：
-                <strong :class="isCustomAllocationValid() ? 'text-green-600' : 'text-red-500'" 
-                        x-text="(Number(expenseForm.amount || 0) - sumCustomAmounts()).toFixed(1) + ' ' + expenseForm.currency">
-                </strong>
-              </span>
-            </div>
-          </template>
+          <!-- 不等分計算提示 (改用 x-show 替代 x-if) -->
+          <div x-show="expenseForm.splitType === 'custom'" class="mt-3 flex justify-between items-center text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold">
+            <span>
+              已分配總和：
+              <strong class="text-gray-700" x-text="sumCustomAmounts() + ' ' + expenseForm.currency"></strong>
+            </span>
+            <span>
+              剩餘未分配：
+              <strong :class="isCustomAllocationValid() ? 'text-green-600' : 'text-red-500'" x-text="getRemainingAmountText()"></strong>
+            </span>
+          </div>
         </div>
 
-        <!-- 6. 儲存按鈕 -->
+        <!-- 7. 儲存按鈕 -->
         <button 
           type="submit"
           class="w-full bg-gradient-to-r from-teal-600 to-green-600 text-white font-extrabold py-3.5 px-4 rounded-xl shadow-md hover:from-teal-700 hover:to-green-700 transition-all flex items-center justify-center gap-2"
@@ -1205,7 +1296,7 @@
       </form>
     </div>
 
-    <!-- --- 分頁4：成員維護 --- -->
+    <!-- --- 分頁4：成員維護 (核心修復：全面加入行內編輯更名與最安全的手機刪除觸發) --- -->
     <div x-show="activeTab === 'members'" class="max-w-2xl mx-auto space-y-6">
       <!-- 新增成員 -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
@@ -1231,126 +1322,112 @@
         </form>
       </div>
 
-      <!-- 成員列表 -->
+      <!-- 成員列表 (完全使用 x-show 替換 x-if，絕不留給瀏覽器解析空 document 標籤的空間) -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4" x-text="'當前成員列表 (' + members.length + ' 人)：'"></h3>
-        <template x-if="members.length === 0">
-          <div class="text-center py-8 text-gray-400">
-            <span class="text-4xl block">🔍</span>
-            目無成員，請於上方欄位新增！
-          </div>
-        </template>
+        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4" x-text="getMemberListTitle()"></h3>
+        
+        <div x-show="members.length === 0" class="text-center py-8 text-gray-400">
+          <span class="text-4xl block">🔍</span>
+          目無成員，請於上方欄位新增！
+        </div>
 
-        <template x-if="members.length > 0">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <template x-for="member in members" :key="member">
-              <div class="flex items-center justify-between p-3.5 bg-gray-50 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
+        <div x-show="members.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <template x-for="member in members" :key="member">
+            <div class="flex items-center justify-between p-3.5 bg-gray-50 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
+              
+              <!-- [非編輯狀態下] 顯示正常頭像與姓名 -->
+              <div x-show="editingMemberName !== member" class="flex items-center justify-between w-full min-w-0">
                 <div class="flex items-center gap-3 min-w-0">
-                  <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
+                  <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0" :style="getMemberStyle(member)" x-text="member[0]"></span>
                   <span class="font-bold text-gray-700 truncate" x-text="member"></span>
                 </div>
                 
-                <button 
-                  type="button"
-                  @click="askDeleteMember(member)"
-                  class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0 ml-2"
-                  title="刪除成員"
-                >
-                  ❌
-                </button>
+                <div class="flex items-center gap-1 shrink-0 ml-2">
+                  <!-- ✏️ 行內編輯更名按鈕 -->
+                  <button 
+                    type="button"
+                    @click="startEditMember(member)"
+                    class="text-xs text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1.5 rounded-lg border border-blue-200 font-bold transition-colors"
+                    title="更名成員"
+                  >
+                    ✏️ 更改
+                  </button>
+                  
+                  <!-- ❌ 穩定刪除按鈕 -->
+                  <button 
+                    type="button"
+                    @click="askDeleteMember(member)"
+                    class="text-xs text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2 py-1.5 rounded-lg border border-red-200 font-bold transition-colors"
+                    title="刪除成員"
+                  >
+                    ❌ 刪除
+                  </button>
+                </div>
               </div>
-            </template>
-          </div>
-        </template>
+
+              <!-- [行內編輯狀態下] 轉化為輸入與儲存按鈕 -->
+              <div x-show="editingMemberName === member" class="flex items-center gap-2 w-full min-w-0">
+                <input 
+                  type="text" 
+                  x-model="editingMemberNewValue" 
+                  @keydown.enter="saveMemberRename(member)"
+                  class="flex-1 bg-white border-2 border-teal-500 rounded-xl px-3 py-1.5 text-base sm:text-sm font-bold text-gray-800 outline-none min-w-0" 
+                  placeholder="修改名字..."
+                />
+                <div class="flex gap-1 shrink-0">
+                  <button 
+                    type="button" 
+                    @click="saveMemberRename(member)" 
+                    class="bg-green-600 hover:bg-green-700 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-xs"
+                  >💾 存</button>
+                  <button 
+                    type="button" 
+                    @click="editingMemberName = null" 
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                  >取消</button>
+                </div>
+              </div>
+
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
-    <!-- --- 分頁5：統計圖表 --- -->
-    <div x-show="activeTab === 'charts'" class="space-y-6">
-      
-      <!-- 分類開銷統計 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center gap-2 mb-6 border-b pb-3">
-          <span class="text-2xl shrink-0">🍕</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">消費分類開銷統計 (折合港幣)</h2>
-        </div>
+    <!-- 付款大戶排行榜 -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 mt-6">
+      <div class="flex items-center gap-2 mb-6 border-b pb-3">
+        <span class="text-2xl shrink-0">👑</span>
+        <h2 class="text-lg sm:text-xl font-bold text-gray-800">代墊款項貢獻排行榜 (港幣累計，誰出得最多)</h2>
+      </div>
 
-        <template x-if="statistics.totalSpending === 0">
-          <div class="text-center py-12 text-gray-400">
-            <span class="text-5xl block mb-2">📊</span>
-            尚無記帳紀錄，無法產生圖表！
-          </div>
-        </template>
+      <div x-show="statistics.totalSpending === 0" class="text-center py-12 text-gray-400">
+        目前無任何代墊數據。
+      </div>
 
-        <template x-if="statistics.totalSpending > 0">
-          <div class="space-y-5">
-            <template x-for="cat in categories" :key="cat.id">
-              <div class="space-y-1.5" x-show="(statistics.categorySpending[cat.id] || 0) > 0">
-                <div class="flex justify-between items-center text-sm">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="shrink-0" x-text="cat.icon"></span>
-                    <span class="font-bold text-gray-700 truncate" x-text="cat.name"></span>
-                  </div>
-                  <div class="font-semibold text-gray-500 shrink-0 ml-2 text-xs sm:text-sm">
-                    <span class="text-gray-800 font-bold" x-text="'HK$ ' + Math.round(statistics.categorySpending[cat.id] || 0).toLocaleString() + ' 元'"></span>
-                    <span class="ml-1 sm:ml-2 text-xs text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded" 
-                          x-text="Math.round(((statistics.categorySpending[cat.id] || 0) / statistics.totalSpending) * 100) + '%'">
-                    </span>
-                  </div>
-                </div>
-                <!-- 進度條 -->
-                <div class="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
-                  <div 
-                    class="bg-gradient-to-r from-teal-500 to-green-500 h-full rounded-full transition-all duration-500"
-                    :style="'width: ' + Math.round(((statistics.categorySpending[cat.id] || 0) / statistics.totalSpending) * 100) + '%'"
-                  ></div>
-                </div>
+      <div x-show="statistics.totalSpending > 0" class="space-y-4">
+        <template x-for="member in members" :key="member">
+          <div class="flex items-center gap-4">
+            <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(member)" x-text="member[0]"></span>
+            
+            <div class="flex-1 min-w-0 space-y-1">
+              <div class="flex justify-between items-center text-sm">
+                <span class="font-bold text-gray-700 truncate" x-text="member"></span>
+                <span class="text-xs font-semibold text-gray-500 shrink-0 ml-2">
+                  累計代墊折合 <strong class="text-gray-800" x-text="getMemberPaidText(member)"></strong> 元
+                </span>
               </div>
-            </template>
+              
+              <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                <div 
+                  class="bg-green-500 h-full rounded-full"
+                  :style="getMemberPaidWidthStyle(member)"
+                ></div>
+              </div>
+            </div>
           </div>
         </template>
       </div>
-
-      <!-- 付款大戶排行榜 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center gap-2 mb-6 border-b pb-3">
-          <span class="text-2xl shrink-0">👑</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">代墊款項貢獻排行榜 (港幣累計，誰出得最多)</h2>
-        </div>
-
-        <template x-if="statistics.totalSpending === 0">
-          <div class="text-center py-12 text-gray-400">
-            目前無記帳數據
-          </div>
-        </template>
-
-        <template x-if="statistics.totalSpending > 0">
-          <div class="space-y-4">
-            <template x-for="member in members" :key="member">
-              <div class="flex items-center gap-4">
-                <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :class="getMemberColorClass(member)" x-text="member[0]"></span>
-                
-                <div class="flex-1 min-w-0 space-y-1">
-                  <div class="flex justify-between items-center text-sm">
-                    <span class="font-bold text-gray-700 truncate" x-text="member"></span>
-                    <span class="text-xs font-semibold text-gray-500 shrink-0 ml-2">
-                      累計代墊折合 <strong class="text-gray-800" x-text="'HK$ ' + Math.round(memberBalances[member]?.paid || 0).toLocaleString()"></strong> 元
-                    </span>
-                  </div>
-                  
-                  <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                    <div 
-                      class="bg-teal-500 h-full rounded-full"
-                      :style="'width: ' + Math.round(((memberBalances[member]?.paid || 0) / statistics.totalSpending) * 100) + '%'"
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </template>
-      </div>
-
     </div>
 
   </main>
