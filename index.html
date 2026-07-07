@@ -508,22 +508,26 @@
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-800 font-sans pb-16" x-data="splitApp">
 
-  <!-- 導覽列 -->
-  <header class="bg-gradient-to-r from-teal-600 to-green-600 text-white shadow-md sticky top-0 z-40">
+  <!-- 導覽列：全新改版「極致深灰高對比面板」，徹底解決在手機或強光下白色小字、分隔線看不清的問題 -->
+  <header class="bg-gray-900 text-white shadow-md sticky top-0 z-40 border-b border-gray-800">
     <div class="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div class="flex items-center gap-3">
         <span class="text-3xl shrink-0">⚖️</span>
         <div>
-          <h1 class="text-2xl font-black tracking-wider">作伙算 <span class="text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full ml-1 font-bold">HKD 港幣本位</span></h1>
-          <p class="text-xs text-teal-100 font-medium">親友團體旅遊・支援多幣別匯率換算與分帳</p>
+          <h1 class="text-2xl font-black tracking-wider text-white">
+            作伙算 
+            <span class="text-[10px] bg-green-600 text-white px-2 py-0.5 rounded-full ml-1 font-bold">HKD 港幣本位</span>
+          </h1>
+          <p class="text-xs text-gray-300 font-medium">親友團體旅遊・支援多幣別匯率換算與分帳</p>
         </div>
       </div>
-      <div class="flex flex-wrap justify-center items-center gap-2 bg-teal-700 bg-opacity-50 px-4 py-1.5 rounded-full text-xs shrink-0">
-        <span>👥 成員：</span>
-        <span class="font-bold text-yellow-300" x-text="members.length + ' 人'"></span>
-        <span class="text-teal-300">|</span>
-        <span>💰 總支出：</span>
-        <span class="font-bold text-yellow-300" x-text="'HK$ ' + Math.round(statistics.totalSpending).toLocaleString() + ' 元'"></span>
+      <!-- 右側資訊泡泡：使用 bg-gray-800 配合 border-gray-700。文字為高清晰 text-gray-300，數字為銘黃色 text-yellow-300，分隔線改為深灰色 -->
+      <div class="flex flex-wrap justify-center items-center gap-2 bg-gray-800 border border-gray-700 px-4 py-1.5 rounded-full text-xs shrink-0">
+        <span class="text-gray-300">👥 成員：</span>
+        <span class="font-black text-yellow-300 text-sm" x-text="members.length + ' 人'"></span>
+        <span class="text-gray-600 px-0.5">|</span>
+        <span class="text-gray-300">💰 總支出：</span>
+        <span class="font-black text-yellow-300 text-sm" x-text="'HK$ ' + Math.round(statistics.totalSpending).toLocaleString() + ' 元'"></span>
       </div>
     </div>
   </header>
@@ -1125,7 +1129,7 @@
         <template x-if="members.length === 0">
           <div class="text-center py-8 text-gray-400">
             <span class="text-4xl block">🔍</span>
-            目前尚無成員，請於上方欄位新增！
+            目無成員，請於上方欄位新增！
           </div>
         </template>
 
@@ -1141,7 +1145,7 @@
                 <button 
                   type="button"
                   @click="askDeleteMember(member)"
-                  class="text-gray-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0 ml-2"
+                  class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0 ml-2"
                   title="刪除成員"
                 >
                   ❌
@@ -1226,7 +1230,7 @@
                     </span>
                   </div>
                   
-                  <div class="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+                  <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                     <div 
                       class="bg-teal-500 h-full rounded-full"
                       :style="'width: ' + Math.round(((memberBalances[member]?.paid || 0) / statistics.totalSpending) * 100) + '%'"
