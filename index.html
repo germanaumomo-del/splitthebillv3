@@ -135,6 +135,16 @@
           message: ''
         },
 
+        // --- 彈出訊息提示函數 (核心修復：補回被遺漏的 showToast) ---
+        showToast(type, msg) {
+          this.toast.message = msg;
+          this.toast.type = type;
+          this.toast.show = true;
+          setTimeout(() => {
+            this.toast.show = false;
+          }, 3500);
+        },
+
         // --- 初始化設定 ---
         init() {
           // 暫存全域實例，讓 Firebase 異步模組安全存取
@@ -448,7 +458,7 @@
             description: description.trim(),
             amount: numericAmount,
             currency: currency,
-            rate: currentRate,
+            rate: currentRate, // 鎖定交易當下匯率
             payer,
             category,
             date,
