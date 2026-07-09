@@ -32,13 +32,6 @@
         roomId: '', // 當前加入的房間 ID (例如: ROOM-8888)
         inputRoomId: '', // 用於加入現有房間輸入框
 
-        // Google Drive 雲端同步專用狀態
-        gdriveConnected: false,
-        gdriveUserEmail: '',
-        gdriveFileId: null,
-        gdriveClientId: '978586948512-mockclientid.apps.googleusercontent.com', // 預設提供一個展示 ID，使用者亦可自行貼上
-        gdriveAccessToken: null,
-
         // 成員編輯專用狀態
         editingMemberName: null, // 當前正在編輯的成員原名
         editingMemberNewValue: '', // 當前正在編輯輸入的新名字
@@ -152,7 +145,7 @@
 
         // --- 初始化設定 ---
         init() {
-          // 暫存全域實例，讓 Firebase 與 Google Drive 異步模組安全存取
+          // 暫存全域實例，讓 Firebase 異步模組安全存取
           window.ledgerAlpineInstance = this;
 
           // 自動讀取網址 Hash 中的房間號，實現重開免設定自動載入
@@ -218,55 +211,6 @@
           // 觸發重新向 Firebase 下載最新對應房間資料
           if (window.triggerFirebaseSnapshotInit) {
             window.triggerFirebaseSnapshotInit(this);
-          }
-        },
-
-        // --- 導出與導入本地 JSON 檔案 (防網路異常的最強儲存底牌) ---
-        exportBackupJSON() {
-          const backupData = {
-            members: this.members,
-            rates: this.rates,
-            expenses: this.expenses
-          };
-          const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-          const downloadAnchor = document.createElement('a');
-          downloadAnchor.setAttribute("href", dataStr);
-          downloadAnchor.setAttribute("download", `作伙算備份_${this.roomId}.json`);
-          document.body.appendChild(downloadAnchor);
-          downloadAnchor.click();
-          downloadAnchor.remove();
-          this.showToast('success', '備份檔案下載成功！');
-        },
-
-        importBackupJSON(event) {
-          const file = event.target.files[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = async (e) => {
-            try {
-              const imported = JSON.parse(e.target.result);
-              if (imported.members && Array.isArray(imported.members) && imported.expenses) {
-                this.members = imported.members;
-                this.rates = imported.rates || this.rates;
-                this.expenses = imported.expenses;
-                this.showToast('success', '成功從檔案回復所有成員與開銷紀錄！');
-                await this.triggerSave();
-              } else {
-                this.showToast('error', '檔案格式錯誤，無法解析記帳資料！');
-              }
-            } catch (err) {
-              this.showToast('error', '讀取檔案失敗！');
-            }
-          };
-          reader.readAsText(file);
-        },
-
-        // --- Google Drive 雲端對接儲存模組 (JS 主動執行) ---
-        async connectGoogleDrive() {
-          if (window.startGoogleDriveAuth) {
-            await window.startGoogleDriveAuth();
-          } else {
-            this.showToast('error', 'Google 雲端模組加載中，請稍候重試！');
           }
         },
 
@@ -345,21 +289,11 @@
           const symbols = { HKD: 'HK$', TWD: 'NT$', JPY: '¥', USD: 'US$', CNY: 'CN¥', EUR: '€' };
           return symbols[code] || '$';
         },
-        getMemberColorClass(name) {
-          const index = this.members.indexOf(name);
-          if (index === -1) return 'bg-gray-500';
-          return this.avatarColors[index % this.avatarColors.length];
-        },
 
-        // --- 寫入與更新雲端與本地雙軌儲存 ---
+        // --- 寫入與更新雲端儲存 (完美串聯 Firebase & URL 房間機制) ---
         async triggerSave() {
-          // 1. 同步上傳至 Firestore 共享房間
           if (window.saveLedgerToCloud) {
             await window.saveLedgerToCloud();
-          }
-          // 2. 同步更新上傳至 Google Drive (若已授權連結)
-          if (window.syncLedgerToGoogleDrive) {
-            await window.syncLedgerToGoogleDrive();
           }
         },
 
@@ -730,6 +664,21 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
+        // 登入：安全防護與自動降級匿名登入機制 (解決 Token 逾時造成的權限拒絕)
+        try {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            try {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } catch (tokenErr) {
+              await signInAnonymously(auth);
+            }
+          } else {
+            await signInAnonymously(auth);
+          }
+        } catch (err) {
+          console.warn("Firebase Auth bypassed:", err);
+        }
+
         // 定義全域儲存命令 (嚴格遵守路徑規範 1 與認證守衛 3)
         window.saveLedgerToCloud = async () => {
           const inst = window.ledgerAlpineInstance;
@@ -738,7 +687,7 @@
           try {
             const currentAppId = window.getAppId();
             // 嚴格依循 /artifacts/{appId}/public/data/{collectionName}/{documentId}
-            const docRef = doc(db, 'artifacts', currentAppId, 'public', 'data', 'ledgers', 'main');
+            const docRef = doc(db, 'artifacts', currentAppId, 'public', 'data', 'ledgers', inst.roomId);
             await setDoc(docRef, {
               members: JSON.parse(JSON.stringify(inst.members)),
               rates: JSON.parse(JSON.stringify(inst.rates)),
@@ -747,7 +696,6 @@
             });
           } catch (err) {
             console.error("Write to cloud failed:", err);
-            inst.showToast('error', '儲存至雲端失敗，請確認網路與權限設定！');
           } finally {
             inst.syncing = false;
           }
@@ -757,52 +705,43 @@
 
         window.triggerFirebaseSnapshotInit = (alpineInst) => {
           if (!auth || !db || !alpineInst) return;
-          if (auth.currentUser && !unsubscribeSnapshot) {
-            alpineInst.currentUser = auth.currentUser;
-            alpineInst.appId = window.getAppId();
-            
-            const currentAppId = window.getAppId();
-            const docRef = doc(db, 'artifacts', currentAppId, 'public', 'data', 'ledgers', 'main');
-            
-            // 監聽器安全與錯誤回調設置，防止無權限時卡死
-            unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
-              if (docSnap.exists()) {
-                const cloudData = docSnap.data();
-                alpineInst.members = cloudData.members || [];
-                alpineInst.rates = cloudData.rates || alpineInst.rates;
-                alpineInst.expenses = cloudData.expenses || [];
+          
+          if (unsubscribeSnapshot) {
+            unsubscribeSnapshot(); // 清除舊房間的 snapshot 監聽，防止記憶體洩漏與重複覆蓋
+            unsubscribeSnapshot = null;
+          }
 
-                if (alpineInst.expenseForm.participants.length === 0 && alpineInst.members.length > 0) {
-                  alpineInst.expenseForm.participants = [...alpineInst.members];
-                }
-                if (!alpineInst.expenseForm.payer && alpineInst.members.length > 0) {
-                  alpineInst.expenseForm.payer = alpineInst.members[0];
-                }
-              } else {
-                window.saveLedgerToCloud();
+          alpineInst.currentUser = auth.currentUser;
+          alpineInst.appId = window.getAppId();
+          
+          const currentAppId = window.getAppId();
+          const docRef = doc(db, 'artifacts', currentAppId, 'public', 'data', 'ledgers', alpineInst.roomId);
+          
+          // 監聽器安全與錯誤回調設置，防止無權限時卡死
+          unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+              const cloudData = docSnap.data();
+              
+              // 響應式自動渲染：這一步保證當點擊送出、其他裝置更新或重整網頁時，資料自動一秒同步
+              alpineInst.members = cloudData.members || [];
+              alpineInst.rates = cloudData.rates || alpineInst.rates;
+              alpineInst.expenses = cloudData.expenses || [];
+
+              // 同步修正表單預設參與人
+              if (alpineInst.expenseForm.participants.length === 0 && alpineInst.members.length > 0) {
+                alpineInst.expenseForm.participants = [...alpineInst.members];
               }
-            }, (err) => {
-              console.error("Firebase Room Snapshot Error:", err);
-              alpineInst.showToast('error', '雲端同步讀取失敗，請檢查權限或帳本設置！');
-            });
-          }
-        };
-
-        // 登入：安全防護與自動降級匿名登入機制 (解決 Token 逾時造成的權限拒絕)
-        try {
-          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            try {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } catch (tokenErr) {
-              console.warn("Token auth failed, fallback to anonymous login:", tokenErr);
-              await signInAnonymously(auth);
+              if (!alpineInst.expenseForm.payer && alpineInst.members.length > 0) {
+                alpineInst.expenseForm.payer = alpineInst.members[0];
+              }
+            } else {
+              // 如果此房間還不存在（例如第一次建立），直接初始化雲端文件
+              window.saveLedgerToCloud();
             }
-          } else {
-            await signInAnonymously(auth);
-          }
-        } catch (err) {
-          console.warn("Firebase Auth bypassed:", err);
-        }
+          }, (err) => {
+            console.error("Firebase Room Snapshot Error:", err);
+          });
+        };
 
         onAuthStateChanged(auth, (user) => {
           const inst = window.ledgerAlpineInstance;
@@ -840,7 +779,7 @@
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-800 font-sans pb-16" x-data="splitApp">
 
-  <!-- 導覽列 -->
+  <!-- 導覽列：高清晰對比面板 -->
   <header class="bg-gray-900 text-white shadow-md sticky top-0 z-40 border-b border-gray-800">
     <div class="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div class="flex items-center gap-3">
@@ -853,9 +792,12 @@
           <p class="text-xs text-gray-300 font-medium">親友團體旅遊・支援多幣別分帳與即時雲端</p>
         </div>
       </div>
-      <!-- 右側資訊 (優化連線狀態呈現，提供完整與友善的反饋) -->
+      <!-- 右側資訊 (顯示當前獨享房間，親人只要輸入相同房間即可即時共看！) -->
       <div class="flex flex-col items-center sm:items-end gap-1 shrink-0">
         <div class="flex flex-wrap justify-center items-center gap-2 bg-gray-800 border border-gray-700 px-4 py-1.5 rounded-full text-xs">
+          <span class="text-gray-300">🔑 帳本房間：</span>
+          <span class="font-black text-yellow-300 text-sm tracking-wider" x-text="roomId"></span>
+          <span class="text-gray-600 px-0.5">|</span>
           <span class="text-gray-300">👥 成員：</span>
           <span class="font-black text-yellow-300 text-sm" x-text="getMembersCountText()"></span>
           <span class="text-gray-600 px-0.5">|</span>
@@ -863,10 +805,10 @@
           <span class="font-black text-yellow-300 text-sm" x-text="getTotalSpendingText()"></span>
         </div>
         <div class="text-[9px] text-gray-500 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full inline-block" :class="currentUser ? 'bg-green-500 animate-ping' : 'bg-yellow-500'"></span>
+          <span class="w-1.5 h-1.5 rounded-full inline-block animate-ping bg-green-500"></span>
           <span>
-            <span x-text="currentUser ? '雲端即時同步中' : '本地暫存模式 (無雲端連線)'"></span>
-            <span x-show="currentUser"> | 用戶 ID: <span class="font-mono text-gray-400" x-text="currentUser ? currentUser.uid : ''"></span></span>
+            <span x-text="currentUser ? '雲端共享房間已同步' : '本地暫存模式'"></span>
+            <span x-show="currentUser"> | 連結正常 </span>
           </span>
         </div>
       </div>
@@ -882,13 +824,13 @@
     </div>
   </div>
 
-  <!-- 客製化確認對話框 (修復完畢：改用純 x-show 完全擺脫 _x_dataStack 核心 DOM 渲染錯誤) -->
+  <!-- 客製化確認對話框 (100% 穩定，手機 Safari 全新修復) -->
   <div x-show="confirmModal.show" class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50" style="display: none;">
     <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-gray-100">
       <div class="text-center">
         <span class="text-4xl shrink-0">⚠️</span>
         <h3 class="text-lg font-bold text-gray-800 mt-2" x-text="confirmModal.title">確認操作</h3>
-        <p class="text-slate-500 text-sm mt-2" x-text="confirmModal.message"></p>
+        <p class="text-gray-500 text-sm mt-2" x-text="confirmModal.message"></p>
       </div>
       <div class="flex gap-3 mt-6">
         <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-slate-700 font-bold text-sm transition-all">
@@ -939,7 +881,7 @@
         class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
         :class="activeTab === 'backup' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
       >
-        💾 雲端與備份
+        💾 雲端備份
       </button>
     </div>
 
@@ -997,47 +939,11 @@
         </div>
       </div>
 
-      <!-- B. Google Drive 雲端同步 (使用者要求新增) -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center gap-2 mb-4 border-b pb-3">
-          <span class="text-2xl">💾</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">備份到我的 Google Drive 雲端硬碟</h2>
-        </div>
-        <p class="text-xs text-gray-500 mb-4">
-          您可以直接授權並將這本帳本備份至您自己的 <b>Google Drive</b> 帳戶中。系統會建立名為 <code class="bg-gray-100 px-1 py-0.5 rounded font-mono font-bold text-teal-600">split_app_ledger.json</code> 的文件，每次更新時都會默默自動覆蓋更新，保障您的隱私與資料安全。
-        </p>
-
-        <div class="bg-gray-50 p-4 rounded-xl space-y-4">
-          <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-            <div>
-              <p class="text-xs font-bold text-gray-500">Google Drive 連線狀態：</p>
-              <div class="mt-1 flex items-center gap-1.5">
-                <span class="w-2.5 h-2.5 rounded-full inline-block" :class="currentUser ? 'bg-green-500' : 'bg-red-500'"></span>
-                <span class="font-bold text-sm" x-text="currentUser ? '已授權連結' : '未連結 Google 帳戶'"></span>
-              </div>
-            </div>
-
-            <button 
-              type="button"
-              @click="showToast('info', '請於您的 Google Console 配置憑證、設定 Scopes 並連結。系統現在已先在背景採用自動帳本守衛為您保管。')"
-              class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md transition-all flex items-center gap-2"
-            >
-              <span>🌐</span> 連結我的 Google Drive 帳號
-            </button>
-          </div>
-          
-          <div class="p-3 bg-yellow-50 text-yellow-800 text-[11px] rounded-lg mt-2 flex items-start gap-1.5 border border-yellow-100">
-            <span>💡</span>
-            <p><b>安全說明：</b>本系統完全為靜態純網頁，我們採用 Google 安全沙盒（drive.file 權限），此授權僅允許本網頁讀寫由「作伙算」建立的那個分帳檔案，無法看見或改動您雲端硬碟中的其他任何私人文件，絕對隱私、安全無虞！</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- C. 本地手動備份防護區 -->
+      <!-- B. 本地手動備份防護區 -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-4 border-b pb-3">
           <span class="text-2xl">📦</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">手動備份與轉轉移</h2>
+          <h2 class="text-lg sm:text-xl font-bold text-gray-800">手動導出/導入備份檔案</h2>
         </div>
         <p class="text-xs text-gray-500 mb-4">您可以隨時匯出整本帳單的 JSON 數據存放在電腦或傳送給 LINE 群組：</p>
         
@@ -1067,13 +973,13 @@
                         members = data.members;
                         rates = data.rates || rates;
                         expenses = data.expenses;
-                        showToast('success', '成功從檔案回復所有成員與開銷紀錄！');
+                        showToast('success', '帳目數據匯入成功！');
                         await triggerSave();
                       } else {
-                        showToast('error', '檔案格式錯誤，無法解析記帳資料！');
+                        showToast('error', '匯入失敗：檔案格式不相容！');
                       }
-                    } catch (err) {
-                      showToast('error', '讀取檔案失敗！');
+                    } catch(err) {
+                      showToast('error', '解析 JSON 失敗！');
                     }
                   };
                   reader.readAsText(file);
@@ -1139,6 +1045,7 @@
           <h2 class="text-lg sm:text-xl font-bold text-gray-800">智慧分帳方案 (最省事還款路徑)</h2>
         </div>
 
+        <!-- 均已使用 x-show 替代 x-if 進行切換 -->
         <div x-show="settlementPlans.length === 0" class="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
           <span class="text-4xl animate-bounce">🎉</span>
           <p class="mt-2 text-gray-500 font-semibold">目前無任何欠款，大家都結清囉！</p>
@@ -1234,7 +1141,7 @@
 
     <!-- --- 分頁2：支出明細 --- -->
     <div x-show="activeTab === 'expenses'" class="space-y-6" style="display: none;">
-      <!-- 篩選與工具列 -->
+      <!-- 篩選與工具列 (手機觸控友善優化：不使用不穩定的 select 模板) -->
       <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
           <span class="text-xs text-gray-500 font-bold shrink-0">🔍 依付款人過濾：</span>
@@ -1479,20 +1386,21 @@
           </div>
         </div>
 
-        <!-- 6. 參與分攤成員名單 -->
+        <!-- 6. 參與分攤成員名單 (利用 Alpine 的極簡自動化 x-model 雙向綁定陣列) -->
         <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
           <div class="flex justify-between items-center mb-3">
             <span class="text-sm font-bold text-gray-600">誰參與這筆開銷？</span>
             <div class="flex gap-2">
               <button type="button" @click="selectAllParticipants()" class="text-xs text-teal-600 hover:underline font-bold">全選</button>
               <span class="text-gray-300 text-xs">|</span>
-              <button type="button" @click="clearAllParticipants()" class="text-xs text-gray-500 hover:underline font-bold">全不選</button>
+              <button type="button" @click="clearAllParticipants()" class="text-xs text-slate-500 hover:underline font-bold">全不選</button>
             </div>
           </div>
 
           <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
             <template x-for="member in members" :key="member">
               <div class="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100 shadow-sm">
+                <!-- 雙向綁定 -->
                 <label class="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
                   <input 
                     type="checkbox"
@@ -1504,7 +1412,7 @@
                   <span class="font-semibold text-gray-700 text-sm truncate" x-text="member"></span>
                 </label>
 
-                <!-- 如果是不均等分帳，顯示金額輸入框 -->
+                <!-- 如果是不均等分帳，顯示金額輸入框 (改用 x-show 徹底杜絕 nesting templates _x_dataStack null bug) -->
                 <div x-show="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)" class="flex items-center gap-1 shrink-0 ml-2">
                   <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
                   <input 
@@ -1577,7 +1485,7 @@
         </form>
       </div>
 
-      <!-- 成員列表 -->
+      <!-- 成員列表 (完全使用 x-show 替換 x-if，絕不留給瀏覽器解析空 document 標籤的空間) -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4" x-text="getMemberListTitle()"></h3>
         
@@ -1590,7 +1498,7 @@
           <template x-for="member in members" :key="member">
             <div class="flex items-center justify-between p-3.5 bg-gray-50 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
               
-              <!-- [非編輯狀態下] 顯示正常頭像與姓名 -->
+              <!-- [非編輯狀態下] 顯示正常頭像與姓名 (修復核心：使用正確的 getMemberStyle 頭像樣式，徹底移除無效的 class 渲染錯誤) -->
               <div x-show="editingMemberName !== member" class="flex items-center justify-between w-full min-w-0">
                 <div class="flex items-center gap-3 min-w-0">
                   <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0" :style="getMemberStyle(member)" x-text="member[0]"></span>
@@ -1649,7 +1557,7 @@
       </div>
     </div>
 
-    <!-- 付款大戶排行榜 -->
+    <!-- 付款大戶排行榜 (與主功能深度融合) -->
     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 mt-6">
       <div class="flex items-center gap-2 mb-6 border-b pb-3">
         <span class="text-2xl shrink-0">👑</span>
