@@ -42,7 +42,7 @@
       leave-to-class="opacity-0"
     >
       <div v-if="toast.show" class="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center space-x-2"
-           :class="toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'">
+           :class="toast.type === 'success' ? 'bg-emerald-600 text-white' : (toast.type === 'error' ? 'bg-rose-600 text-white' : 'bg-amber-600 text-white')">
         <span class="font-medium text-sm">{{ toast.message }}</span>
       </div>
     </transition>
@@ -52,7 +52,7 @@
         ========================================== -->
     <div v-if="loading" class="flex flex-col items-center justify-center flex-grow bg-slate-50">
       <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-600 mb-4"></div>
-      <p class="text-sm font-medium text-slate-600">即時雲端同步連線中...</p>
+      <p class="text-sm font-medium text-slate-600">正在初始化系統中...</p>
     </div>
 
     <!-- ==========================================
@@ -67,7 +67,7 @@
           <!-- Logo SVG -->
           <div class="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl mb-4">
             <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" strokeLinejoin="round" stroke-width="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 11h.01M12 7h.01M15 11h.01M15 7h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 11h.01M12 7h.01M15 11h.01M15 7h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
           </div>
           <h1 class="text-2xl font-bold tracking-tight">多人即時同步分帳</h1>
@@ -75,6 +75,11 @@
         </div>
 
         <div class="p-8 space-y-6">
+          <!-- 演示模式提示 (若未啟用雲端) -->
+          <div v-if="demoMode" class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-xs text-center">
+            ⚠️ 偵測到當前未配置雲端資料庫，已為您自動啟用<strong>「本機演示模式」</strong>，功能完全可用！
+          </div>
+
           <!-- 新建群組 -->
           <div class="text-center">
             <button
@@ -134,11 +139,14 @@
               </svg>
             </div>
             <div>
-              <h2 class="text-lg font-bold tracking-tight">即時分帳同步版</h2>
+              <h2 class="text-lg font-bold tracking-tight">
+                多人即時分帳計算器 
+                <span v-if="demoMode" class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md ml-1 inline-block">演示模式</span>
+              </h2>
               <div class="flex items-center space-x-2">
-                <span class="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                <span class="inline-block w-2.5 h-2.5 rounded-full animate-pulse" :class="demoMode ? 'bg-amber-500' : 'bg-emerald-500'"></span>
                 <span class="text-xs text-slate-500 font-medium">
-                  {{ syncing ? '雲端同步中...' : '已與雲端同步完成' }}
+                  {{ demoMode ? '資料目前僅保存在本機記憶體' : (syncing ? '雲端同步中...' : '已與雲端同步完成') }}
                 </span>
               </div>
             </div>
@@ -530,29 +538,35 @@
 
   </div>
 
-  <!-- Vue 3 Import Map & Script Module -->
-  <script type="importmap">
-    {
-      "imports": {
-        "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
-      }
-    }
-  </script>
-
   <script type="module">
-    import { createApp, ref, reactive, computed, watch, onMounted } from 'vue';
+    // 直接從 URL 導入，移除對 importmap 的依賴，大幅增強瀏覽器相容性
+    import { createApp, ref, reactive, computed, watch, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // --- Firebase 初始化 (使用提供的全局變數) ---
-    const firebaseConfig = JSON.parse(__firebase_config);
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+    // --- Firebase 初始化保護機制 ---
+    let app, auth, db;
+    let demoMode = false;
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'split-bill-app';
 
-    // 建立 Vue App
+    try {
+      if (typeof __firebase_config === 'undefined' || !__firebase_config) {
+        throw new Error("無效的雲端設定變數 __firebase_config");
+      }
+      const firebaseConfig = JSON.parse(__firebase_config);
+      if (!firebaseConfig.apiKey) {
+        throw new Error("Firebase 設定檔中缺少 apiKey");
+      }
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+    } catch (err) {
+      console.warn("⚠️ Firebase 連線啟用失敗，改用「本機演示模式」進行渲染：", err.message);
+      demoMode = true;
+    }
+
+    // 建立 Vue 應用程式
     createApp({
       setup() {
         // --- 狀態定義 ---
@@ -587,23 +601,28 @@
           }, 4000);
         };
 
-        // --- 1. Firebase 匿名登入 (符合 RULE 3) ---
+        // --- 1. Firebase 登入流程 (在 Demo 模式下直接略過) ---
         onMounted(async () => {
-          try {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-              await signInAnonymously(auth);
-            }
-          } catch (err) {
-            console.error('Firebase Auth Error:', err);
-            showToast('與伺服器連線驗證失敗', 'error');
-          }
-
-          onAuthStateChanged(auth, (currentUser) => {
-            user.value = currentUser;
+          if (demoMode) {
+            user.value = { uid: 'demo-user-id' };
             loading.value = false;
-          });
+          } else {
+            try {
+              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+              } else {
+                await signInAnonymously(auth);
+              }
+            } catch (err) {
+              console.error('Firebase Auth Error:', err);
+              showToast('與伺服器連線驗證失敗，切換為本地預覽', 'error');
+            }
+
+            onAuthStateChanged(auth, (currentUser) => {
+              user.value = currentUser;
+              loading.value = false;
+            });
+          }
 
           // 監聽網址 Hash 變化，自動進入群組
           const handleHashChange = () => {
@@ -623,10 +642,9 @@
           window.addEventListener('hashchange', handleHashChange);
         });
 
-        // --- 2. 即時監聽與同步 Firestore 數據 (符合 RULE 1, 2, 3) ---
+        // --- 2. 數據讀取與監聽 (支援本機 Demo 與 雲端即時同步) ---
         let unsubscribeListener = null;
         watch([user, roomId], ([newUser, newRoomId]) => {
-          // 如果有舊監聽，先移除
           if (unsubscribeListener) {
             unsubscribeListener();
             unsubscribeListener = null;
@@ -635,6 +653,40 @@
           if (!newUser || !newRoomId) return;
 
           syncing.value = true;
+
+          if (demoMode) {
+            // 本機演示模式：給予初始測試數據，無須雲端連線
+            setTimeout(() => {
+              roomData.value = {
+                roomId: newRoomId,
+                members: ['小明', '阿花', '大強'],
+                expenses: [
+                  {
+                    id: 'exp-demo-1',
+                    title: '美味麻辣火鍋',
+                    amount: 1500,
+                    payer: '小明',
+                    participants: ['小明', '阿花', '大強'],
+                    date: new Date().toLocaleString('zh-TW', { hour12: false })
+                  },
+                  {
+                    id: 'exp-demo-2',
+                    title: '回程計程車共乘',
+                    amount: 300,
+                    payer: '阿花',
+                    participants: ['阿花', '大強'],
+                    date: new Date().toLocaleString('zh-TW', { hour12: false })
+                  }
+                ],
+                createdAt: new Date().toISOString()
+              };
+              syncing.value = false;
+              showToast('已進入「本機模擬群組」！可以自由增刪測試功能！', 'success');
+            }, 200);
+            return;
+          }
+
+          // 正常雲端同步模式 (符合 RULE 1, 2, 3)
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', newRoomId);
 
           unsubscribeListener = onSnapshot(
@@ -643,7 +695,6 @@
               if (docSnap.exists()) {
                 roomData.value = docSnap.data();
               } else {
-                // 如果群組不存在，自動為其初始化一個
                 const initialData = {
                   roomId: newRoomId,
                   members: [],
@@ -664,7 +715,7 @@
             },
             (error) => {
               console.error('Firestore listener error:', error);
-              showToast('即時同步連線中斷，請重新整理網頁', 'error');
+              showToast('即時同步連線中斷，請重整網頁', 'error');
               syncing.value = false;
             }
           );
@@ -676,7 +727,6 @@
             if (!expPayer.value || !newMembers.includes(expPayer.value)) {
               expPayer.value = newMembers[0];
             }
-            // 預設所有人都是參與分攤者
             if (expParticipants.value.length === 0) {
               expParticipants.value = [...newMembers];
             }
@@ -722,12 +772,17 @@
             return;
           }
 
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           const updatedMembers = [...roomData.value.members, name];
-
-          // 同步新成員到分攤者中
           expParticipants.value.push(name);
 
+          if (demoMode) {
+            roomData.value.members = updatedMembers;
+            newMemberName.value = '';
+            showToast(`已成功加入成員：${name}`, 'success');
+            return;
+          }
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           updateDoc(docRef, { members: updatedMembers })
             .then(() => {
               newMemberName.value = '';
@@ -741,7 +796,6 @@
 
         // --- 8. 刪除成員 ---
         const handleDeleteMember = (memberName) => {
-          // 檢查該成員是否有關聯的支出
           const isPayer = roomData.value.expenses.some(exp => exp.payer === memberName);
           const isParticipant = roomData.value.expenses.some(exp => exp.participants && exp.participants.includes(memberName));
 
@@ -750,12 +804,16 @@
             return;
           }
 
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           const updatedMembers = roomData.value.members.filter(m => m !== memberName);
-
-          // 同時從勾選中移除
           expParticipants.value = expParticipants.value.filter(p => p !== memberName);
 
+          if (demoMode) {
+            roomData.value.members = updatedMembers;
+            showToast(`已刪除成員：${memberName}`, 'success');
+            return;
+          }
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           updateDoc(docRef, { members: updatedMembers })
             .then(() => {
               showToast(`已刪除成員：${memberName}`, 'success');
@@ -795,14 +853,22 @@
             date: new Date().toLocaleString('zh-TW', { hour12: false })
           };
 
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
-          const updatedExpenses = [newExpense, ...roomData.value.expenses]; // 新帳目置頂
+          const updatedExpenses = [newExpense, ...roomData.value.expenses];
 
+          if (demoMode) {
+            roomData.value.expenses = updatedExpenses;
+            expTitle.value = '';
+            expAmount.value = '';
+            expParticipants.value = [...roomData.value.members];
+            showToast('成功新增支出項目', 'success');
+            return;
+          }
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           updateDoc(docRef, { expenses: updatedExpenses })
             .then(() => {
               expTitle.value = '';
               expAmount.value = '';
-              // 重設參與人為全選
               expParticipants.value = [...roomData.value.members];
               showToast('成功新增支出項目', 'success');
             })
@@ -814,9 +880,15 @@
 
         // --- 10. 刪除支出項目 ---
         const handleDeleteExpense = (expId) => {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           const updatedExpenses = roomData.value.expenses.filter(exp => exp.id !== expId);
 
+          if (demoMode) {
+            roomData.value.expenses = updatedExpenses;
+            showToast('已刪除該筆支出', 'success');
+            return;
+          }
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
           updateDoc(docRef, { expenses: updatedExpenses })
             .then(() => {
               showToast('已刪除該筆支出', 'success');
@@ -827,7 +899,7 @@
             });
         };
 
-        // --- 11. 複製邀請連結 (相容 iframe 安全性) ---
+        // --- 11. 複製邀請連結 ---
         const handleCopyInviteLink = () => {
           const shareUrl = `${window.location.origin}${window.location.pathname}#room-${roomId.value}`;
           const textarea = document.createElement('textarea');
@@ -965,6 +1037,7 @@
           toast,
           memberSummaries,
           transactions,
+          demoMode,
           handleCreateRoom,
           handleJoinRoom,
           handleExitRoom,
