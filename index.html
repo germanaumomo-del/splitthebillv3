@@ -135,7 +135,7 @@
           message: ''
         },
 
-        // --- 彈出訊息提示函數 (核心修復：100% 補全 showToast 方法，根除 TypeError) ---
+        // --- 彈出訊息提示函數 (核心修復：補回被遺漏的 showToast) ---
         showToast(type, msg) {
           this.toast.message = msg;
           this.toast.type = type;
@@ -218,7 +218,7 @@
         },
         getParticipantShareText(exp, p) {
           const share = exp.splitType === 'equal' 
-            ? (exp.amount / exp.participants.length) 
+            ? (exp.amount / (exp.participants.length || 1)) 
             : (exp.customAmounts[p] || 0);
           return '(分攤 HK$ ' + Math.round(share * exp.rate) + ')';
         },
@@ -268,11 +268,6 @@
         getCurrencySymbol(code) {
           const symbols = { HKD: 'HK$', TWD: 'NT$', JPY: '¥', USD: 'US$', CNY: 'CN¥', EUR: '€' };
           return symbols[code] || '$';
-        },
-        getMemberColorClass(name) {
-          const index = this.members.indexOf(name);
-          if (index === -1) return 'bg-gray-500';
-          return this.avatarColors[index % this.avatarColors.length];
         },
 
         // --- 寫入與更新雲端主方法 ---
@@ -616,7 +611,7 @@
     });
   </script>
 
-  <!-- 3. 靜態非同步載入 Alpine JS 框架 -->
+  <!-- 3. 靜態非同步載入 Alpine JS 框架 (僅此載入一次！徹底解決複下載 Alpine 重複初始化崩潰 null _x_dataStack 的 Bug) -->
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 
   <!-- 4. 採用 ES2020 動態 import () 載入 Firebase 模組，徹底預防斷網或 CSP 沙盒安全策略攔截時產生 Script Error 卡死網頁 -->
@@ -907,7 +902,7 @@
           <p class="text-xs text-gray-400 mt-1">當您開始新增帳目，系統會自動轉換為港幣並算出最適還款方案。</p>
         </div>
 
-        <div x-show="settlementPlans.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div x-show="settlementPlans.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6" style="display: none;">
           <!-- 還款步驟 -->
           <div class="space-y-3">
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">建議轉帳步驟：</h3>
@@ -942,14 +937,14 @@
             </div>
           </div>
 
-          <!-- 所有人結算明細 -->
+          <!-- 所有人結算明細 (修正核心：將殘留的 getMemberColorClass 替換為穩定的動態 getMemberStyle 並且添加 x-text) -->
           <div class="bg-gray-50 p-4 sm:p-5 rounded-xl border border-gray-200">
             <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">所有人當前結算明細 (折合港幣)：</h3>
             <div class="space-y-3">
               <template x-for="member in members" :key="member">
                 <div class="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm">
                   <div class="flex items-center gap-2 min-w-0">
-                    <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(member)"></span>
+                    <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(member)" x-text="member[0]"></span>
                     <div class="min-w-0 flex-1">
                       <span class="font-bold text-gray-700 text-sm block truncate" x-text="member"></span>
                       <span class="text-[10px] text-gray-400 block truncate" x-text="getMemberBalanceDetailText(member)"></span>
@@ -957,9 +952,15 @@
                   </div>
 
                   <div class="text-right shrink-0 ml-2">
-                    <span x-show="getMemberNetBalance(member) > 0.01" class="text-green-600 font-bold text-[11px] sm:text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100" x-text="'應收回 HK$ ' + Math.round(getMemberNetBalance(member)).toLocaleString()"></span>
-                    <span x-show="getMemberNetBalance(member) < -0.01" class="text-red-600 font-bold text-[11px] sm:text-xs bg-red-50 px-2 py-1 rounded-full border border-red-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(getMemberNetBalance(member))).toLocaleString()"></span>
-                    <span x-show="Math.abs(getMemberNetBalance(member)) <= 0.01" class="text-gray-400 text-xs sm:text-sm font-semibold">已結清</span>
+                    <template x-if="getMemberNetBalance(member) > 0.01">
+                      <span class="text-green-600 font-bold text-[11px] sm:text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100" x-text="'應收回 HK$ ' + Math.round(getMemberNetBalance(member)).toLocaleString()"></span>
+                    </template>
+                    <template x-if="getMemberNetBalance(member) < -0.01">
+                      <span class="text-red-600 font-bold text-[11px] sm:text-xs bg-red-50 px-2 py-1 rounded-full border border-red-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(getMemberNetBalance(member))).toLocaleString()"></span>
+                    </template>
+                    <template x-if="Math.abs(getMemberNetBalance(member)) <= 0.01">
+                      <span class="text-gray-400 text-xs sm:text-sm font-semibold">已結清</span>
+                    </template>
                   </div>
                 </div>
               </template>
@@ -995,7 +996,7 @@
     </div>
 
     <!-- --- 分頁2：支出明細 --- -->
-    <div x-show="activeTab === 'expenses'" class="space-y-6">
+    <div x-show="activeTab === 'expenses'" class="space-y-6" style="display: none;">
       <!-- 篩選與工具列 (手機觸控友善優化：不使用不穩定的 select 模板) -->
       <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
@@ -1053,7 +1054,7 @@
           <p class="text-gray-400 text-sm mt-1">您可以嘗試調整篩選條件，或是點選上方「新增支出」開始記帳。</p>
         </div>
 
-        <div x-show="filteredExpenses.length > 0" class="space-y-4">
+        <div x-show="filteredExpenses.length > 0" class="space-y-4" style="display: none;">
           <template x-for="exp in filteredExpenses" :key="exp.id">
             <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <!-- 支出基本資訊 -->
@@ -1115,7 +1116,7 @@
     </div>
 
     <!-- --- 分頁3：新增支出 --- -->
-    <div x-show="activeTab === 'add'" class="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
+    <div x-show="activeTab === 'add'" class="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6" style="display: none;">
       <div class="flex items-center gap-2 mb-6 border-b pb-3">
         <span class="text-2xl shrink-0">✍️</span>
         <h2 class="text-lg sm:text-xl font-bold text-gray-800">登記一筆新支出</h2>
@@ -1242,7 +1243,7 @@
         </div>
 
         <!-- 6. 參與分攤成員名單 -->
-        <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+        <div class="bg-slate-50 p-4 rounded-xl border border-gray-200">
           <div class="flex justify-between items-center mb-3">
             <span class="text-sm font-bold text-gray-600">誰參與這筆開銷？</span>
             <div class="flex gap-2">
@@ -1267,7 +1268,7 @@
                   <span class="font-semibold text-gray-700 text-sm truncate" x-text="member"></span>
                 </label>
 
-                <!-- 如果是不均等分帳，顯示金額輸入框 -->
+                <!-- 如果是不均等分帳，顯示金額輸入框 (改用 x-show 徹底杜絕 nesting templates _x_dataStack null bug) -->
                 <div x-show="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)" class="flex items-center gap-1 shrink-0 ml-2">
                   <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
                   <input 
@@ -1281,7 +1282,7 @@
             </template>
           </div>
           
-          <!-- 平分計算提示 -->
+          <!-- 平分計算提示 (改用 x-show 替代 x-if) -->
           <div x-show="expenseForm.splitType === 'equal' && expenseForm.participants.length > 0 && Number(expenseForm.amount) > 0" class="mt-3 text-right text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold space-y-1">
             <div>
               預估每人分攤：
@@ -1290,7 +1291,7 @@
             <div x-show="expenseForm.currency !== 'HKD'" class="text-gray-400 text-[11px]" x-text="getEstimatedShareHKDText()"></div>
           </div>
 
-          <!-- 不等分計算提示 -->
+          <!-- 不等分計算提示 (改用 x-show 替代 x-if) -->
           <div x-show="expenseForm.splitType === 'custom'" class="mt-3 flex justify-between items-center text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold">
             <span>
               已分配總和：
@@ -1314,8 +1315,8 @@
       </form>
     </div>
 
-    <!-- --- 分頁4：成員維護 --- -->
-    <div x-show="activeTab === 'members'" class="max-w-2xl mx-auto space-y-6">
+    <!-- --- 分頁4：成員維護 (核心修復：全面加入行內編輯更名與最安全的手機刪除觸發) --- -->
+    <div x-show="activeTab === 'members'" class="max-w-2xl mx-auto space-y-6" style="display: none;">
       <!-- 新增成員 -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <div class="flex items-center gap-2 mb-4 border-b pb-3">
@@ -1436,7 +1437,7 @@
                 </span>
               </div>
               
-              <div class="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+              <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                 <div 
                   class="bg-green-500 h-full rounded-full"
                   :style="getMemberPaidWidthStyle(member)"
