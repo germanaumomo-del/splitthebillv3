@@ -1,1603 +1,984 @@
 <!DOCTYPE html>
-<html lang="zh-Hant-TW">
+<html lang="zh-Hant" class="h-full bg-slate-50">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>作伙算 - 多人團體分帳記帳系統 (港幣本位版)</title>
-  
-  <!-- 1. 採用靜態純 CSS 版本的 Tailwind CDN (100% 免疫手機廣告攔截與 JS 載入延遲) -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多人即時同步分帳計算器</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 防止 Vue 模板在載入完成前閃爍 */
+    [v-cloak] {
+      display: none !important;
+    }
+    /* 自訂滾動條樣式 */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="h-full text-slate-800 flex flex-col font-sans">
 
-  <!-- 2. 使用常規同步 script 註冊 Alpine 元件，徹底避免手機時序問題與 ReferenceError -->
-  <script>
-    // 建立全域安全的 appId 獲取器，100% 保障安全路徑符合規則 1 與規則 3
-    window.getAppId = function() {
-      if (typeof __app_id !== 'undefined' && __app_id) return __app_id;
-      if (window.__app_id) return window.__app_id;
-      return 'default-split-app';
-    };
+  <div id="app" v-cloak class="min-h-screen flex flex-col">
+    
+    <!-- Toast 提示訊息 -->
+    <transition
+      enter-active-class="transition ease-out duration-300"
+      enter-from-class="opacity-0 translate-y-2 sm:translate-y-0 sm:translate-x-2"
+      enter-to-class="opacity-100 translate-y-0 sm:translate-x-0"
+      leave-active-class="transition ease-in duration-200"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div v-if="toast.show" class="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center space-x-2"
+           :class="toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'">
+        <span class="font-medium text-sm">{{ toast.message }}</span>
+      </div>
+    </transition>
 
-    window.splitAppComponent = function() {
-      return {
-        // --- 狀態數據 (預先載入預設值，防阻擋、防卡死，保證隨開即用) ---
-        members: ['阿明', '小華', '美玲', '志強', '小芳'],
-        newMemberName: '',
-        activeTab: 'settlement',
-        showRateSettings: false, // 匯率設定展開/收合
-        syncing: false, // 是否正在同步寫入中
-        currentUser: null, // 當前 Firebase 使用者認證狀態
-        appId: window.getAppId(),
+    <!-- ==========================================
+        載入中畫面
+        ========================================== -->
+    <div v-if="loading" class="flex flex-col items-center justify-center flex-grow bg-slate-50">
+      <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-600 mb-4"></div>
+      <p class="text-sm font-medium text-slate-600">即時雲端同步連線中...</p>
+    </div>
+
+    <!-- ==========================================
+        畫面 A：未加入群組（群組選擇首頁）
+        ========================================== -->
+    <div v-else-if="!roomId || !roomData" class="flex-grow flex items-center justify-center p-4">
+      <div class="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
+        <div class="bg-gradient-to-br from-emerald-600 to-teal-700 p-8 text-white text-center relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10"></div>
+          <div class="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full -ml-8 -mb-8"></div>
+          
+          <!-- Logo SVG -->
+          <div class="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl mb-4">
+            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" strokeLinejoin="round" stroke-width="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 11h.01M12 7h.01M15 11h.01M15 7h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+          <h1 class="text-2xl font-bold tracking-tight">多人即時同步分帳</h1>
+          <p class="text-emerald-100 text-sm mt-1">免登入、跨裝置、無痛平攤所有開銷</p>
+        </div>
+
+        <div class="p-8 space-y-6">
+          <!-- 新建群組 -->
+          <div class="text-center">
+            <button
+              @click="handleCreateRoom"
+              class="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-medium py-3.5 px-4 rounded-xl transition duration-200 shadow-md flex items-center justify-center space-x-2 text-sm"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+              </svg>
+              <span>建立全新分帳群組</span>
+            </button>
+            <p class="text-xs text-slate-400 mt-2">系統將為您生成專屬隨機密碼群組，點擊即可開啟</p>
+          </div>
+
+          <div class="relative flex py-2 items-center text-slate-300">
+            <div class="flex-grow border-t border-slate-200"></div>
+            <span class="flex-shrink mx-4 text-xs font-semibold text-slate-400">或者加入既有群組</span>
+            <div class="flex-grow border-t border-slate-200"></div>
+          </div>
+
+          <!-- 加入群組 -->
+          <form @submit.prevent="handleJoinRoom" class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">請輸入群組代碼</label>
+              <input
+                type="text"
+                placeholder="例如：A8B2CD"
+                v-model="inputRoomId"
+                class="w-full uppercase text-center font-mono font-bold tracking-widest bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 focus:placeholder-transparent focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 rounded-xl py-3 px-4 outline-none transition-all duration-200"
+              />
+            </div>
+            <button
+              type="submit"
+              class="w-full bg-slate-800 hover:bg-slate-900 active:bg-black text-white font-medium py-3.5 px-4 rounded-xl transition duration-200 shadow-sm flex items-center justify-center space-x-2 text-sm"
+            >
+              <span>進入群組</span>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==========================================
+        畫面 B：已進入群組（主工作區）
+        ========================================== -->
+    <div v-else class="flex-grow flex flex-col">
+      <!-- 頂部導覽列 -->
+      <header class="sticky top-0 z-30 bg-white border-b border-slate-100 shadow-sm px-4 py-3 md:px-6">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-lg font-bold tracking-tight">即時分帳同步版</h2>
+              <div class="flex items-center space-x-2">
+                <span class="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                <span class="text-xs text-slate-500 font-medium">
+                  {{ syncing ? '雲端同步中...' : '已與雲端同步完成' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center flex-wrap gap-2">
+            <!-- 群組代碼 -->
+            <div class="bg-slate-100 text-slate-800 font-mono font-bold px-3 py-1.5 rounded-lg flex items-center space-x-2 border border-slate-200">
+              <span class="text-xs text-slate-400 font-sans">群組：</span>
+              <span class="tracking-widest text-sm">{{ roomId }}</span>
+              <button
+                @click="handleCopyInviteLink"
+                title="複製邀請連結"
+                class="text-slate-500 hover:text-emerald-600 transition p-0.5"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- 分享按鈕 -->
+            <button
+              @click="handleCopyInviteLink"
+              class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs px-3 py-2 rounded-lg transition-colors flex items-center space-x-1"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path>
+              </svg>
+              <span>分享群組</span>
+            </button>
+
+            <!-- 退出按鈕 -->
+            <button
+              @click="handleExitRoom"
+              class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs px-3 py-2 rounded-lg transition-colors flex items-center space-x-1"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+              </svg>
+              <span>返回首頁</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- 主體網格佈局 -->
+      <main class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow w-full">
         
-        // 房間管理狀態 (解決資料割裂、重開還原的核心設計)
-        roomId: '', // 當前加入的房間 ID (例如: ROOM-8888)
-        inputRoomId: '', // 用於加入現有房間輸入框
+        <!-- ==========================================
+            左欄 (3 cols): 成員管理
+            ========================================== -->
+        <section class="lg:col-span-3 space-y-6">
+          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
+              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+              </svg>
+              <span>成員管理</span>
+              <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+                {{ roomData.members.length }} 人
+              </span>
+            </h3>
 
-        // 成員編輯專用狀態
-        editingMemberName: null, // 當前正在編輯的成員原名
-        editingMemberNewValue: '', // 當前正在編輯輸入的新名字
+            <!-- 新增成員表單 -->
+            <form @submit.prevent="handleAddMember" class="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="新成員姓名"
+                v-model="newMemberName"
+                class="flex-grow bg-slate-50 border border-slate-200 text-sm placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition"
+              />
+              <button
+                type="submit"
+                class="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl px-4 py-2 text-sm font-semibold transition"
+              >
+                加入
+              </button>
+            </form>
 
-        // 刪除與確認動作的安全狀態機 (100% 穩定安全)
-        confirmAction: {
-          type: '', // 'deleteMember' 或 'deleteExpense'
-          target: null
-        },
-        
-        // 匯率設定：1 單位外幣 = X 港幣 (HKD)
-        rates: {
-          HKD: 1.0000,
-          TWD: 0.2420,  // 1 TWD ≈ 0.242 HKD
-          JPY: 0.0510,  // 1 JPY ≈ 0.051 HKD
-          USD: 7.8000,  // 1 USD ≈ 7.800 HKD
-          CNY: 1.0750,  // 1 CNY ≈ 1.075 HKD
-          EUR: 8.4200   // 1 EUR ≈ 8.420 HKD
-        },
+            <!-- 成員清單 -->
+            <div v-if="roomData.members.length === 0" class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              尚未加入任何成員
+            </div>
+            <div v-else class="space-y-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+              <div
+                v-for="member in roomData.members"
+                :key="member"
+                class="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition group"
+              >
+                <span class="text-sm font-semibold text-slate-800">{{ member }}</span>
+                <button
+                  @click="handleDeleteMember(member)"
+                  title="刪除成員"
+                  class="text-slate-400 hover:text-rose-600 p-1 lg:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
 
-        // 預設分類
-        categories: [
-          { id: 'food', name: '餐飲美食', icon: '🍔', color: 'bg-orange-100 text-orange-600 border-orange-200' },
-          { id: 'transport', name: '交通出行', icon: '🚗', color: 'bg-blue-100 text-blue-600 border-blue-200' },
-          { id: 'lodging', name: '住宿飯店', icon: '🏨', color: 'bg-purple-100 text-purple-600 border-purple-200' },
-          { id: 'entertainment', name: '娛樂門票', icon: '🎟️', color: 'bg-pink-100 text-pink-600 border-pink-200' },
-          { id: 'shopping', name: '購物血拼', icon: '🛍️', color: 'bg-yellow-100 text-yellow-600 border-yellow-200' },
-          { id: 'other', name: '其他雜項', icon: 'bg-gray-100 text-gray-600 border-gray-200' }
-        ],
+        <!-- ==========================================
+            中欄 (5 cols): 支出清單 & 新增支出
+            ========================================== -->
+        <section class="lg:col-span-5 space-y-6">
+          <!-- 新增支出區 -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
+              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span>記一筆支出</span>
+            </h3>
 
-        avatarColors: [
-          'bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 
-          'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'
-        ],
+            <div v-if="roomData.members.length === 0" class="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              請先於左側新增成員，即可開始記帳！
+            </div>
+            
+            <form v-else @submit.prevent="handleAddExpense" class="space-y-4">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-500 mb-1.5">項目名稱</label>
+                  <input
+                    type="text"
+                    placeholder="例：計程車、晚餐"
+                    v-model="expTitle"
+                    class="w-full bg-slate-50 border border-slate-200 text-sm placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-500 mb-1.5">金額</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0.00"
+                    v-model="expAmount"
+                    class="w-full bg-slate-50 border border-slate-200 text-sm placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition font-semibold"
+                  />
+                </div>
+              </div>
 
-        // 預設支出紀錄
-        expenses: [
-          {
-            id: '1',
-            description: '香港迪士尼樂園門票',
-            amount: 3100,
-            currency: 'HKD',
-            rate: 1.0000, // 港幣本位
-            payer: '阿明',
-            category: 'entertainment',
-            date: '2026-07-05',
-            splitType: 'equal',
-            participants: ['阿明', '小華', '美玲', '志強', '小芳'],
-            customAmounts: {}
-          },
-          {
-            id: '2',
-            description: '台北市民宿三晚住宿費',
-            amount: 12000,
-            currency: 'TWD',
-            rate: 0.2420, // 當時匯率
-            payer: '美玲',
-            category: 'lodging',
-            date: '2026-07-05',
-            splitType: 'equal',
-            participants: ['阿明', '小華', '美玲', '志強', '小芳'],
-            customAmounts: {}
+              <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1.5">是誰代付的？</label>
+                <div class="relative">
+                  <select
+                    v-model="expPayer"
+                    class="w-full bg-slate-50 border border-slate-200 text-sm text-slate-800 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition appearance-none"
+                  >
+                    <option v-for="m in roomData.members" :key="m" :value="m">{{ m }}</option>
+                  </select>
+                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 參與分攤人選取框 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="block text-xs font-semibold text-slate-500">
+                    哪些人需要分攤？ 
+                    <span class="text-emerald-600 ml-1">({{ expParticipants.length }} 人分攤)</span>
+                  </label>
+                  <div class="flex space-x-2 text-xs">
+                    <button
+                      type="button"
+                      @click="handleSelectAllParticipants"
+                      class="text-emerald-600 hover:text-emerald-700 font-bold"
+                    >
+                      全選
+                    </button>
+                    <span class="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      @click="handleClearParticipants"
+                      class="text-slate-500 hover:text-slate-600"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-36 overflow-y-auto space-y-2 custom-scrollbar">
+                  <label
+                    v-for="member in roomData.members"
+                    :key="member"
+                    class="flex items-center space-x-3 cursor-pointer select-none text-sm font-medium"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="member"
+                      v-model="expParticipants"
+                      class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span :class="expParticipants.includes(member) ? 'text-slate-800' : 'text-slate-400 line-through'">
+                      {{ member }}
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                class="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-xl transition duration-200 shadow-sm flex items-center justify-center space-x-2 text-sm"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span>送出此筆支出</span>
+              </button>
+            </form>
+          </div>
+
+          <!-- 支出記錄列表 -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
+              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+              </svg>
+              <span>支出明細</span>
+              <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+                {{ roomData.expenses.length }} 筆
+              </span>
+            </h3>
+
+            <div v-if="roomData.expenses.length === 0" class="text-center py-10 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              尚未建立任何款項支出
+            </div>
+            <div v-else class="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
+              <div
+                v-for="exp in roomData.expenses"
+                :key="exp.id"
+                class="p-3.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-slate-200 transition relative group"
+              >
+                <div class="flex justify-between items-start mb-1">
+                  <div>
+                    <h4 class="font-bold text-sm text-slate-800">{{ exp.title }}</h4>
+                    <p class="text-[10px] text-slate-400 font-mono mt-0.5">{{ exp.date }}</p>
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <span class="font-bold text-sm text-emerald-700">
+                      ${{ Number(exp.amount).toFixed(2) }}
+                    </span>
+                    <button
+                      @click="handleDeleteExpense(exp.id)"
+                      title="刪除此支出"
+                      class="text-slate-400 hover:text-rose-600 p-1 lg:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="mt-2 pt-2 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-1.5 text-xs text-slate-500">
+                  <div>
+                    <span>付款人：</span>
+                    <span class="font-semibold text-slate-700">{{ exp.payer }}</span>
+                  </div>
+                  <div class="max-w-[70%] text-right overflow-hidden text-ellipsis whitespace-nowrap" :title="exp.participants.join(', ')">
+                    <span>分攤者：</span>
+                    <span class="font-semibold text-slate-600 bg-slate-200/50 px-1.5 py-0.5 rounded text-[10px]">
+                      {{ exp.participants.length === roomData.members.length ? '全部人' : exp.participants.join(', ') }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==========================================
+            右欄 (4 cols): 結算統計 & 最優還款方案
+            ========================================== -->
+        <section class="lg:col-span-4 space-y-6">
+          
+          <!-- 個人收支統計 -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
+              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path>
+              </svg>
+              <span>收支結算</span>
+            </h3>
+
+            <div v-if="roomData.members.length === 0" class="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              暫無數據
+            </div>
+            <div v-else class="space-y-3">
+              <div
+                v-for="member in roomData.members"
+                :key="member"
+                class="p-3 rounded-xl border border-slate-100 bg-slate-50 flex flex-col space-y-1.5"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-sm text-slate-800">{{ member }}</span>
+                  
+                  <!-- 狀態標籤 -->
+                  <span v-if="memberSummaries[member] && memberSummaries[member].net > 0.01" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    應收回 ${{ Math.abs(memberSummaries[member].net).toFixed(2) }}
+                  </span>
+                  <span v-else-if="memberSummaries[member] && memberSummaries[member].net < -0.01" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                    應支付 ${{ Math.abs(memberSummaries[member].net).toFixed(2) }}
+                  </span>
+                  <span v-else class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                    已結清
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-xs text-slate-500 pt-1.5 border-t border-slate-200/60">
+                  <div>
+                    <span>代付總額：</span>
+                    <span class="font-semibold text-slate-700">${{ (memberSummaries[member]?.paid || 0).toFixed(2) }}</span>
+                  </div>
+                  <div class="text-right">
+                    <span>應攤總額：</span>
+                    <span class="font-semibold text-slate-700">${{ (memberSummaries[member]?.shouldPay || 0).toFixed(2) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 最佳還款方案 -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full -mr-6 -mt-6"></div>
+            
+            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2 relative z-10">
+              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span>最佳還款路徑</span>
+            </h3>
+
+            <div v-if="roomData.expenses.length === 0" class="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200 relative z-10">
+              暫無分帳結算需求
+            </div>
+            
+            <div v-else-if="transactions.length === 0" class="text-center py-6 text-sm text-emerald-600 bg-emerald-50 rounded-xl border border-emerald-100 font-medium relative z-10 flex flex-col items-center justify-center space-y-1">
+              <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span>收支極為平衡，無須進行結算！</span>
+            </div>
+
+            <div v-else class="space-y-3 relative z-10">
+              <div
+                v-for="(t, idx) in transactions"
+                :key="idx"
+                class="flex items-center justify-between p-3 rounded-xl bg-emerald-50/50 border border-emerald-100/80"
+              >
+                <div class="flex items-center space-x-2">
+                  <span class="font-bold text-sm text-slate-800">{{ t.from }}</span>
+                  <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
+                  </svg>
+                  <span class="font-bold text-sm text-slate-800">{{ t.to }}</span>
+                </div>
+                <div class="text-right">
+                  <span class="text-xs text-slate-400 block">支付</span>
+                  <span class="font-black text-emerald-700 text-sm">
+                    ${{ t.amount.toFixed(2) }}
+                  </span>
+                </div>
+              </div>
+
+              <p class="text-[10px] text-slate-400 text-center mt-3">
+                💡 本系統演算法已自動優化轉帳路徑，為您縮減了不必要的重疊交易。
+              </p>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      <!-- 頁尾 -->
+      <footer class="mt-auto py-6 text-center text-xs text-slate-400 border-t border-slate-100 bg-white">
+        <p>© 2026 多人即時同步分帳計算器. 數據已受安全的雲端保護與即時同步.</p>
+      </footer>
+    </div>
+
+  </div>
+
+  <!-- Vue 3 Import Map & Script Module -->
+  <script type="importmap">
+    {
+      "imports": {
+        "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import { createApp, ref, reactive, computed, watch, onMounted } from 'vue';
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Firebase 初始化 (使用提供的全局變數) ---
+    const firebaseConfig = JSON.parse(__firebase_config);
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'split-bill-app';
+
+    // 建立 Vue App
+    createApp({
+      setup() {
+        // --- 狀態定義 ---
+        const user = ref(null);
+        const roomId = ref('');
+        const roomData = ref(null);
+        const loading = ref(true);
+        const syncing = ref(false);
+
+        // 輸入控制狀態
+        const inputRoomId = ref('');
+        const newMemberName = ref('');
+
+        // 支出表單狀態
+        const expTitle = ref('');
+        const expAmount = ref('');
+        const expPayer = ref('');
+        const expParticipants = ref([]);
+
+        // Toast 訊息狀態
+        const toast = reactive({ show: false, message: '', type: 'info' });
+
+        // 輔助函數：顯示通知
+        let toastTimeout = null;
+        const showToast = (message, type = 'info') => {
+          if (toastTimeout) clearTimeout(toastTimeout);
+          toast.show = true;
+          toast.message = message;
+          toast.type = type;
+          toastTimeout = setTimeout(() => {
+            toast.show = false;
+          }, 4000);
+        };
+
+        // --- 1. Firebase 匿名登入 (符合 RULE 3) ---
+        onMounted(async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
+            }
+          } catch (err) {
+            console.error('Firebase Auth Error:', err);
+            showToast('與伺服器連線驗證失敗', 'error');
           }
-        ],
 
-        // 表單狀態 (相容 Safari 的本地時區日期初始化)
-        expenseForm: {
-          description: '',
-          amount: '',
-          currency: 'HKD', // 預設港幣
-          payer: '阿明',
-          category: 'food',
-          date: (() => {
-            const d = new Date();
-            const offset = d.getTimezoneOffset();
-            const localDate = new Date(d.getTime() - (offset * 60 * 1000));
-            return localDate.toISOString().split('T')[0];
-          })(),
-          splitType: 'equal',
-          participants: ['阿明', '小華', '美玲', '志強', '小芳'],
-          customAmounts: {}
-        },
+          onAuthStateChanged(auth, (currentUser) => {
+            user.value = currentUser;
+            loading.value = false;
+          });
 
-        // 篩選
-        filterPayer: 'all',
-        filterCategory: 'all',
-
-        // 自訂 Notification Toast
-        toast: {
-          show: false,
-          type: 'success',
-          message: ''
-        },
-
-        // 自訂確認 Modal
-        confirmModal: {
-          show: false,
-          title: '',
-          message: ''
-        },
-
-        // --- 彈出訊息提示函數 ---
-        showToast(type, msg) {
-          this.toast.message = msg;
-          this.toast.type = type;
-          this.toast.show = true;
-          setTimeout(() => {
-            this.toast.show = false;
-          }, 3500);
-        },
-
-        // --- 初始化設定 ---
-        init() {
-          // 暫存全域實例，讓 Firebase 異步模組安全存取
-          window.ledgerAlpineInstance = this;
-
-          // 自動讀取網址 Hash 中的房間號，實現重開免設定自動載入
-          const hash = window.location.hash;
-          if (hash && hash.includes('room=')) {
-            this.roomId = hash.split('room=')[1].split('&')[0].toUpperCase();
-          } else {
-            // 無房間時自動產生一個本地專屬號碼，防止多人重疊資料割裂
-            this.roomId = 'ROOM-' + Math.floor(1000 + Math.random() * 9000);
-            window.location.hash = 'room=' + this.roomId;
-          }
-
-          this.expenseForm.participants = [...this.members];
-          this.expenseForm.payer = this.members[0] || '';
-
-          // 若 Firebase 比 Alpine 早初始化完成，直接調用對話
-          if (window.triggerFirebaseSnapshotInit) {
-            window.triggerFirebaseSnapshotInit(this);
-          }
-
-          // 成員名單深度響應式同步監聽器 (修復名單更新、刪除及表單連動失效的核心機制)
-          this.$watch('members', (newMembers) => {
-            if (newMembers && newMembers.length > 0) {
-              this.expenseForm.participants = this.expenseForm.participants.filter(p => newMembers.includes(p));
-              newMembers.forEach(m => {
-                if (!this.expenseForm.participants.includes(m)) {
-                  this.expenseForm.participants = [...this.expenseForm.participants, m];
-                }
-              });
-              if (!newMembers.includes(this.expenseForm.payer)) {
-                this.expenseForm.payer = newMembers[0];
+          // 監聽網址 Hash 變化，自動進入群組
+          const handleHashChange = () => {
+            const hash = window.location.hash;
+            if (hash && hash.startsWith('#room-')) {
+              const idFromHash = hash.replace('#room-', '').trim();
+              if (idFromHash) {
+                roomId.value = idFromHash;
               }
             } else {
-              this.expenseForm.payer = '';
-              this.expenseForm.participants = [];
+              roomId.value = '';
+              roomData.value = null;
             }
-          });
-        },
-
-        // --- HSL 飽和色彩自動生成技術 (100% 解決 Safari 顏色缺失與橢圓擠壓問題) ---
-        getMemberStyle(name) {
-          if (!name) return 'background-color: #6B7280;';
-          let hash = 0;
-          for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-          }
-          const h = Math.abs(hash % 360);
-          return 'background-color: hsl(' + h + ', 65%, 40%); min-width: 1.5rem; min-height: 1.5rem;';
-        },
-
-        // --- 房間管理：手動輸入加入現有房間 ---
-        async joinExistingRoom() {
-          const roomToJoin = this.inputRoomId.trim().toUpperCase();
-          if (!roomToJoin) {
-            this.showToast('error', '請輸入正確的房間號碼！');
-            return;
-          }
-          this.roomId = roomToJoin;
-          window.location.hash = 'room=' + this.roomId;
-          this.inputRoomId = '';
-          this.showToast('success', `已切換至房間：${this.roomId}`);
-          
-          // 觸發重新向 Firebase 下載最新對應房間資料
-          if (window.triggerFirebaseSnapshotInit) {
-            window.triggerFirebaseSnapshotInit(this);
-          }
-        },
-
-        // --- 視覺與排版助手函數 ---
-        getMembersCountText() {
-          return this.members.length + ' 人';
-        },
-        getTotalSpendingText() {
-          return 'HK$ ' + Math.round(this.statistics.totalSpending).toLocaleString() + ' 元';
-        },
-        getAverageSpendingText() {
-          return 'HK$ ' + (this.members.length > 0 ? Math.round(this.statistics.totalSpending / this.members.length).toLocaleString() : 0) + ' 元';
-        },
-        getConvertedHKDText(exp) {
-          return '折合港幣 HK$ ' + Math.round(exp.amount * exp.rate).toLocaleString() + ' 元';
-        },
-        getRateText(exp) {
-          return '(當時匯率: ' + exp.rate + ')';
-        },
-        getParticipantsCountText(exp) {
-          return '分攤成員 (' + exp.participants.length + ' 人)：';
-        },
-        getMemberListTitle() {
-          return '當前成員列表 (' + this.members.length + ' 人)：';
-        },
-        getParticipantShareText(exp, p) {
-          const share = exp.splitType === 'equal' 
-            ? (exp.amount / (exp.participants.length || 1)) 
-            : (exp.customAmounts[p] || 0);
-          return '(分攤 HK$ ' + Math.round(share * exp.rate) + ')';
-        },
-        getEstimatedHKDText() {
-          const amt = Number(this.expenseForm.amount) || 0;
-          const rate = this.rates[this.expenseForm.currency] || 1.0;
-          return '按目前匯率折合港幣 約：HK$ ' + (amt * rate).toFixed(2) + ' 元 (1 ' + this.expenseForm.currency + ' ≈ ' + rate + ' HKD)';
-        },
-        getEstimatedShareText() {
-          const amt = Number(this.expenseForm.amount) || 0;
-          const count = this.expenseForm.participants.length || 1;
-          const share = Math.round(amt / count);
-          return this.getCurrencySymbol(this.expenseForm.currency) + ' ' + share + ' ' + this.expenseForm.currency;
-        },
-        getEstimatedShareHKDText() {
-          const amt = Number(this.expenseForm.amount) || 0;
-          const count = this.expenseForm.participants.length || 1;
-          const rate = this.rates[this.expenseForm.currency] || 1.0;
-          const shareHKD = Math.round((amt / count) * rate);
-          return '(每人折合約 HK$ ' + shareHKD + ' 元)';
-        },
-        getRemainingAmountText() {
-          const total = Number(this.expenseForm.amount) || 0;
-          const remaining = total - this.sumCustomAmounts();
-          return remaining.toFixed(1) + ' ' + this.expenseForm.currency;
-        },
-        getMemberBalanceDetailText(member) {
-          const bal = this.memberBalances[member] || { paid: 0, owed: 0, net: 0 };
-          return '已付: HK$ ' + Math.round(bal.paid).toLocaleString() + ' | 應付: HK$ ' + Math.round(bal.owed).toLocaleString();
-        },
-        getMemberNetBalance(member) {
-          return this.memberBalances[member]?.net || 0;
-        },
-        getMemberPaidText(member) {
-          const paid = this.memberBalances[member]?.paid || 0;
-          return 'HK$ ' + Math.round(paid).toLocaleString();
-        },
-        getMemberPaidWidthStyle(member) {
-          const paid = this.memberBalances[member]?.paid || 0;
-          const total = this.statistics.totalSpending || 1;
-          const percentage = Math.round((paid / total) * 100);
-          return 'width: ' + percentage + '%';
-        },
-        getCategoryObj(catId) {
-          return this.categories.find(c => c.id === catId) || { id: 'other', name: '其他', icon: '📦', color: 'bg-gray-100 text-gray-600' };
-        },
-        getCurrencySymbol(code) {
-          const symbols = { HKD: 'HK$', TWD: 'NT$', JPY: '¥', USD: 'US$', CNY: 'CN¥', EUR: '€' };
-          return symbols[code] || '$';
-        },
-
-        // --- 寫入與更新雲端儲存 (完美串聯 Firebase & URL 房間機制) ---
-        async triggerSave() {
-          if (window.saveLedgerToCloud) {
-            await window.saveLedgerToCloud();
-          }
-        },
-
-        // --- 新增成員 (全網重新賦值反應鏈) ---
-        async handleAddMember() {
-          const name = this.newMemberName.trim();
-          if (!name) return;
-          if (this.members.includes(name)) {
-            this.showToast('error', '成員名稱不能重複！');
-            return;
-          }
-          
-          this.members = [...this.members, name];
-          this.newMemberName = '';
-          
-          if (!this.expenseForm.participants.includes(name)) {
-            this.expenseForm.participants = [...this.expenseForm.participants, name];
-          }
-          this.showToast('success', `已成功加入成員：${name}`);
-          await this.triggerSave();
-        },
-
-        // --- 成員更改/更名功能 ---
-        startEditMember(member) {
-          this.editingMemberName = member;
-          this.editingMemberNewValue = member;
-        },
-
-        async saveMemberRename(oldName) {
-          const newName = this.editingMemberNewValue.trim();
-          if (!newName) return;
-          if (newName === oldName) {
-            this.editingMemberName = null;
-            return;
-          }
-          if (this.members.includes(newName)) {
-            this.showToast('error', '成員名稱不能重複！');
-            return;
-          }
-
-          // 1. 更換成員列表中的名稱
-          this.members = this.members.map(m => m === oldName ? newName : m);
-
-          // 2. 自動連動更改所有記帳數據中的付款人、分攤參與者
-          this.expenses = this.expenses.map(exp => {
-            const updatedPayer = exp.payer === oldName ? newName : exp.payer;
-            const updatedParticipants = exp.participants.map(p => p === oldName ? newName : p);
-            
-            const updatedCustomAmounts = {};
-            Object.keys(exp.customAmounts || {}).forEach(k => {
-              const newKey = k === oldName ? newName : k;
-              updatedCustomAmounts[newKey] = exp.customAmounts[k];
-            });
-
-            return {
-              ...exp,
-              payer: updatedPayer,
-              participants: updatedParticipants,
-              customAmounts: updatedCustomAmounts
-            };
-          });
-
-          // 3. 自動連動更改當前新增表單的選取狀態
-          if (this.expenseForm.payer === oldName) {
-            this.expenseForm.payer = newName;
-          }
-          this.expenseForm.participants = this.expenseForm.participants.map(p => p === oldName ? newName : p);
-          if (this.expenseForm.customAmounts[oldName] !== undefined) {
-            this.expenseForm.customAmounts[newName] = this.expenseForm.customAmounts[oldName];
-            delete this.expenseForm.customAmounts[oldName];
-          }
-
-          this.editingMemberName = null;
-          this.showToast('success', `成員已成功更名為：${newName}`);
-          await this.triggerSave();
-        },
-
-        // --- 刪除安全確認機制 (解決手機 Safari 閉包回調被安全阻斷的 Bug) ---
-        askDeleteMember(name) {
-          this.confirmAction = { type: 'deleteMember', target: name };
-          this.confirmModal.title = '確認刪除成員';
-          this.confirmModal.message = `確定要刪除「${name}」嗎？這將會清除與該成員相關的所有分帳關聯與代墊資訊。`;
-          this.confirmModal.show = true;
-        },
-
-        askDeleteExpense(id) {
-          this.confirmAction = { type: 'deleteExpense', target: id };
-          this.confirmModal.title = '確認刪除帳目';
-          this.confirmModal.message = '您確定要永久刪除這筆消費記錄嗎？刪除後將會重新計算所有人債務。';
-          this.confirmModal.show = true;
-        },
-
-        // 執行確認 (狀態分流，100% 穩定安全)
-        async executeConfirm() {
-          const { type, target } = this.confirmAction;
-          if (type === 'deleteMember') {
-            await this.deleteMember(target);
-          } else if (type === 'deleteExpense') {
-            await this.deleteExpense(target);
-          }
-          this.confirmModal.show = false;
-          this.confirmAction = { type: '', target: null };
-        },
-
-        async deleteMember(nameToDelete) {
-          this.members = this.members.filter(m => m !== nameToDelete);
-          
-          this.expenses = this.expenses.map(exp => {
-            const updatedParticipants = exp.participants.filter(p => p !== nameToDelete);
-            const updatedCustomAmounts = { ...exp.customAmounts };
-            delete updatedCustomAmounts[nameToDelete];
-            
-            let updatedPayer = exp.payer;
-            if (exp.payer === nameToDelete) {
-              updatedPayer = this.members[0] || '';
-            }
-
-            return {
-              ...exp,
-              payer: updatedPayer,
-              participants: updatedParticipants,
-              customAmounts: updatedCustomAmounts
-            };
-          }).filter(exp => exp.payer !== '');
-
-          this.expenseForm.participants = this.expenseForm.participants.filter(p => p !== nameToDelete);
-          if (this.expenseForm.payer === nameToDelete) {
-            this.expenseForm.payer = this.members[0] || '';
-          }
-
-          this.showToast('success', `已成功移除成員：${nameToDelete}`);
-          await this.triggerSave();
-        },
-
-        sumCustomAmounts() {
-          return this.expenseForm.participants.reduce((sum, p) => sum + (Number(this.expenseForm.customAmounts[p]) || 0), 0);
-        },
-
-        isCustomAllocationValid() {
-          const total = Number(this.expenseForm.amount) || 0;
-          return Math.abs(total - this.sumCustomAmounts()) < 0.01;
-        },
-
-        async handleAddExpense() {
-          const { description, amount, currency, payer, category, date, splitType, participants, customAmounts } = this.expenseForm;
-          const numericAmount = parseFloat(amount);
-
-          if (!description.trim()) {
-            this.showToast('error', '請輸入消費項目名稱！');
-            return;
-          }
-          if (isNaN(numericAmount) || numericAmount <= 0) {
-            this.showToast('error', '請輸入正確金額！');
-            return;
-          }
-          if (!payer) {
-            this.showToast('error', '請選擇付款人！');
-            return;
-          }
-          if (participants.length === 0) {
-            this.showToast('error', '請至少選擇一位分攤成員！');
-            return;
-          }
-
-          // 不均等分帳驗證
-          if (splitType === 'custom') {
-            if (!this.isCustomAllocationValid()) {
-              this.showToast('error', `分攤金額總和 (${this.sumCustomAmounts()} ${currency}) 必須等於總支出金額 (${numericAmount} ${currency})！`);
-              return;
-            }
-          }
-
-          const currentRate = this.rates[currency] || 1.0;
-
-          const newExpense = {
-            id: Date.now().toString(),
-            description: description.trim(),
-            amount: numericAmount,
-            currency: currency,
-            rate: currentRate, // 鎖定交易當下匯率
-            payer,
-            category,
-            date,
-            splitType,
-            participants: [...participants],
-            customAmounts: splitType === 'custom' ? { ...customAmounts } : {}
           };
 
-          this.expenses = [newExpense, ...this.expenses];
+          handleHashChange();
+          window.addEventListener('hashchange', handleHashChange);
+        });
 
-          // 重置表單 (保留付款人、日期、幣別與類別以利連續記帳)
-          this.expenseForm.description = '';
-          this.expenseForm.amount = '';
-          this.expenseForm.splitType = 'equal';
-          this.expenseForm.participants = [...this.members];
-          this.expenseForm.customAmounts = {};
+        // --- 2. 即時監聽與同步 Firestore 數據 (符合 RULE 1, 2, 3) ---
+        let unsubscribeListener = null;
+        watch([user, roomId], ([newUser, newRoomId]) => {
+          // 如果有舊監聽，先移除
+          if (unsubscribeListener) {
+            unsubscribeListener();
+            unsubscribeListener = null;
+          }
 
-          this.showToast('success', '記帳登記成功！');
-          this.activeTab = 'expenses';
-          await this.triggerSave();
-        },
+          if (!newUser || !newRoomId) return;
 
-        async deleteExpense(id) {
-          this.expenses = this.expenses.filter(exp => exp.id !== id);
-          this.showToast('success', '已刪除該筆帳目！');
-          await this.triggerSave();
-        },
+          syncing.value = true;
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', newRoomId);
 
-        // --- 核心運算：計算每位成員的收支與欠款矩陣 (統一折算為港幣 HKD) ---
-        get memberBalances() {
-          const balances = {};
-          this.members.forEach(m => {
-            balances[m] = { paid: 0, owed: 0, net: 0 };
+          unsubscribeListener = onSnapshot(
+            docRef,
+            (docSnap) => {
+              if (docSnap.exists()) {
+                roomData.value = docSnap.data();
+              } else {
+                // 如果群組不存在，自動為其初始化一個
+                const initialData = {
+                  roomId: newRoomId,
+                  members: [],
+                  expenses: [],
+                  createdAt: new Date().toISOString()
+                };
+                setDoc(docRef, initialData)
+                  .then(() => {
+                    roomData.value = initialData;
+                    showToast('成功建立全新同步分帳群組！', 'success');
+                  })
+                  .catch((err) => {
+                    console.error('Create room error:', err);
+                    showToast('初始化群組失敗，請重試', 'error');
+                  });
+              }
+              syncing.value = false;
+            },
+            (error) => {
+              console.error('Firestore listener error:', error);
+              showToast('即時同步連線中斷，請重新整理網頁', 'error');
+              syncing.value = false;
+            }
+          );
+        });
+
+        // --- 3. 當成員列表更新時，自動預設支出的付款人及分攤人 ---
+        watch(() => roomData.value?.members, (newMembers) => {
+          if (newMembers && newMembers.length > 0) {
+            if (!expPayer.value || !newMembers.includes(expPayer.value)) {
+              expPayer.value = newMembers[0];
+            }
+            // 預設所有人都是參與分攤者
+            if (expParticipants.value.length === 0) {
+              expParticipants.value = [...newMembers];
+            }
+          } else {
+            expPayer.value = '';
+            expParticipants.value = [];
+          }
+        }, { deep: true });
+
+        // --- 4. 生成隨集群組代碼並創建 ---
+        const handleCreateRoom = () => {
+          const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+          window.location.hash = `room-${randomId}`;
+        };
+
+        // --- 5. 加入既有群組 ---
+        const handleJoinRoom = () => {
+          if (!inputRoomId.value.trim()) {
+            showToast('請輸入群組代碼', 'error');
+            return;
+          }
+          const formattedId = inputRoomId.value.trim().toUpperCase();
+          window.location.hash = `room-${formattedId}`;
+        };
+
+        // --- 6. 退出當前群組 ---
+        const handleExitRoom = () => {
+          window.location.hash = '';
+          roomId.value = '';
+          roomData.value = null;
+          inputRoomId.value = '';
+        };
+
+        // --- 7. 新增成員 ---
+        const handleAddMember = () => {
+          if (!newMemberName.value.trim()) {
+            showToast('請輸入成員姓名', 'error');
+            return;
+          }
+          const name = newMemberName.value.trim();
+          if (roomData.value.members.includes(name)) {
+            showToast('該成員姓名已存在', 'error');
+            return;
+          }
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
+          const updatedMembers = [...roomData.value.members, name];
+
+          // 同步新成員到分攤者中
+          expParticipants.value.push(name);
+
+          updateDoc(docRef, { members: updatedMembers })
+            .then(() => {
+              newMemberName.value = '';
+              showToast(`已成功加入成員：${name}`, 'success');
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast('新增成員失敗', 'error');
+            });
+        };
+
+        // --- 8. 刪除成員 ---
+        const handleDeleteMember = (memberName) => {
+          // 檢查該成員是否有關聯的支出
+          const isPayer = roomData.value.expenses.some(exp => exp.payer === memberName);
+          const isParticipant = roomData.value.expenses.some(exp => exp.participants && exp.participants.includes(memberName));
+
+          if (isPayer || isParticipant) {
+            showToast(`無法刪除「${memberName}」，因為其已有相關的帳目記錄。請先刪除包含該成員的支出。`, 'error');
+            return;
+          }
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
+          const updatedMembers = roomData.value.members.filter(m => m !== memberName);
+
+          // 同時從勾選中移除
+          expParticipants.value = expParticipants.value.filter(p => p !== memberName);
+
+          updateDoc(docRef, { members: updatedMembers })
+            .then(() => {
+              showToast(`已刪除成員：${memberName}`, 'success');
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast('刪除成員失敗', 'error');
+            });
+        };
+
+        // --- 9. 新增支出項目 ---
+        const handleAddExpense = () => {
+          if (!expTitle.value.trim()) {
+            showToast('請輸入支出項目名稱', 'error');
+            return;
+          }
+          const amount = parseFloat(expAmount.value);
+          if (isNaN(amount) || amount <= 0) {
+            showToast('請輸入有效的支出金額（大於 0）', 'error');
+            return;
+          }
+          if (!expPayer.value) {
+            showToast('請選擇付款人', 'error');
+            return;
+          }
+          if (expParticipants.value.length === 0) {
+            showToast('請至少勾選一位分攤成員', 'error');
+            return;
+          }
+
+          const newExpense = {
+            id: 'exp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
+            title: expTitle.value.trim(),
+            amount: Number(amount.toFixed(2)),
+            payer: expPayer.value,
+            participants: [...expParticipants.value],
+            date: new Date().toLocaleString('zh-TW', { hour12: false })
+          };
+
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
+          const updatedExpenses = [newExpense, ...roomData.value.expenses]; // 新帳目置頂
+
+          updateDoc(docRef, { expenses: updatedExpenses })
+            .then(() => {
+              expTitle.value = '';
+              expAmount.value = '';
+              // 重設參與人為全選
+              expParticipants.value = [...roomData.value.members];
+              showToast('成功新增支出項目', 'success');
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast('新增支出失敗', 'error');
+            });
+        };
+
+        // --- 10. 刪除支出項目 ---
+        const handleDeleteExpense = (expId) => {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
+          const updatedExpenses = roomData.value.expenses.filter(exp => exp.id !== expId);
+
+          updateDoc(docRef, { expenses: updatedExpenses })
+            .then(() => {
+              showToast('已刪除該筆支出', 'success');
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast('刪除支出失敗', 'error');
+            });
+        };
+
+        // --- 11. 複製邀請連結 (相容 iframe 安全性) ---
+        const handleCopyInviteLink = () => {
+          const shareUrl = `${window.location.origin}${window.location.pathname}#room-${roomId.value}`;
+          const textarea = document.createElement('textarea');
+          textarea.value = `我們一起用「即時同步分帳計算器」記帳吧！\n請點擊連結直接加入我們的分帳群組：\n${shareUrl}\n\n群組代碼：${roomId.value}`;
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            showToast('已成功複製群組邀請連結與代碼！快發給朋友吧。', 'success');
+          } catch (err) {
+            showToast('複製失敗，請手動複製網址分享。', 'error');
+          }
+          document.body.removeChild(textarea);
+        };
+
+        // --- 12. 快速全選/清除分攤人 ---
+        const handleSelectAllParticipants = () => {
+          if (roomData.value) {
+            expParticipants.value = [...roomData.value.members];
+          }
+        };
+
+        const handleClearParticipants = () => {
+          expParticipants.value = [];
+        };
+
+        // --- 13. 分攤與結算核心演算法 (拆帳邏輯) ---
+        const billingCalculation = computed(() => {
+          if (!roomData.value || !roomData.value.members || roomData.value.members.length === 0) {
+            return { memberSummaries: {}, transactions: [] };
+          }
+
+          const { members, expenses } = roomData.value;
+          
+          // 初始化每位成員的數據統計
+          const summaries = {};
+          members.forEach(member => {
+            summaries[member] = {
+              name: member,
+              paid: 0,       
+              shouldPay: 0,  
+              net: 0         
+            };
           });
 
-          this.expenses.forEach(exp => {
-            const amountInHKD = exp.amount * exp.rate;
+          // 走訪所有支出，累加各成員代付與分攤
+          expenses.forEach(exp => {
+            const amount = parseFloat(exp.amount) || 0;
+            const payer = exp.payer;
+            const participants = exp.participants || [];
 
-            if (balances[exp.payer]) {
-              balances[exp.payer].paid += amountInHKD;
+            if (amount <= 0 || participants.length === 0) return;
+
+            // 1. 付款人累加「代付總額」
+            if (summaries[payer]) {
+              summaries[payer].paid += amount;
             }
 
-            const partCount = exp.participants.length;
-            if (partCount === 0) return;
+            // 2. 所有參與者分攤金額
+            const splitShare = amount / participants.length;
+            participants.forEach(p => {
+              if (summaries[p]) {
+                summaries[p].shouldPay += splitShare;
+              }
+            });
+          });
 
-            if (exp.splitType === 'equal') {
-              const shareInHKD = amountInHKD / partCount;
-              exp.participants.forEach(p => {
-                if (balances[p]) {
-                  balances[p].owed += shareInHKD;
-                }
-              });
-            } else {
-              // 自訂不均等分攤 (將各人的原始幣別金額折算為港幣)
-              exp.participants.forEach(p => {
-                if (balances[p]) {
-                  const individualOriginalAmount = exp.customAmounts[p] || 0;
-                  const individualShareInHKD = individualOriginalAmount * exp.rate;
-                  balances[p].owed += individualShareInHKD;
-                }
-              });
+          // 3. 計算淨值 (Net) = Paid - ShouldPay
+          members.forEach(member => {
+            summaries[member].net = summaries[member].paid - summaries[member].shouldPay;
+          });
+
+          // 4. 還款最佳化演算法（利用雙指標法，最小化交易筆數）
+          const debtors = [];  
+          const creditors = []; 
+
+          members.forEach(member => {
+            const net = summaries[member].net;
+            if (net < -0.01) {
+              debtors.push({ name: member, amount: Math.abs(net) });
+            } else if (net > 0.01) {
+              creditors.push({ name: member, amount: net });
             }
           });
-
-          // 淨值 = 實際付出(港幣) - 應付分攤(港幣)
-          this.members.forEach(m => {
-            balances[m].net = balances[m].paid - balances[m].owed;
-          });
-
-          return balances;
-        },
-
-        get settlementPlans() {
-          if (this.members.length === 0) return [];
-
-          const nets = {};
-          this.members.forEach(m => {
-            nets[m] = this.memberBalances[m]?.net || 0;
-          });
-
-          const debtors = [];
-          const creditors = [];
-
-          Object.keys(nets).forEach(name => {
-            const bal = nets[name];
-            if (bal < -0.01) {
-              debtors.push({ name, amount: -bal });
-            } else if (bal > 0.01) {
-              creditors.push({ name, amount: bal });
-            }
-          });
-
-          const plans = [];
-          let dIdx = 0;
-          let cIdx = 0;
 
           debtors.sort((a, b) => b.amount - a.amount);
           creditors.sort((a, b) => b.amount - a.amount);
 
+          const transactions = [];
+          let dIdx = 0;
+          let cIdx = 0;
+
           while (dIdx < debtors.length && cIdx < creditors.length) {
             const debtor = debtors[dIdx];
             const creditor = creditors[cIdx];
-            const settleAmount = Math.min(debtor.amount, creditor.amount);
 
-            if (settleAmount > 0.01) {
-              plans.push({
+            const transferAmount = Math.min(debtor.amount, creditor.amount);
+
+            if (transferAmount > 0.01) {
+              transactions.push({
                 from: debtor.name,
                 to: creditor.name,
-                amount: Math.round(settleAmount * 100) / 100
+                amount: Number(transferAmount.toFixed(2))
               });
             }
 
-            debtor.amount -= settleAmount;
-            creditor.amount -= settleAmount;
+            debtor.amount -= transferAmount;
+            creditor.amount -= transferAmount;
 
             if (debtor.amount < 0.01) dIdx++;
             if (creditor.amount < 0.01) cIdx++;
           }
 
-          return plans;
-        },
-
-        get statistics() {
-          let totalSpending = 0;
-          const categorySpending = {};
-          this.categories.forEach(c => { categorySpending[c.id] = 0; });
-
-          this.expenses.forEach(exp => {
-            const amountInHKD = exp.amount * exp.rate;
-            totalSpending += amountInHKD;
-            if (categorySpending[exp.category] !== undefined) {
-              categorySpending[exp.category] += amountInHKD;
-            } else {
-              categorySpending['other'] = (categorySpending['other'] || 0) + amountInHKD;
-            }
-          });
-
           return {
-            totalSpending,
-            categorySpending
+            memberSummaries: summaries,
+            transactions: transactions
           };
-        },
-
-        get filteredExpenses() {
-          return this.expenses.filter(exp => {
-            const matchPayer = this.filterPayer === 'all' || exp.payer === this.filterPayer;
-            const matchCategory = this.filterCategory === 'all' || exp.category === this.filterCategory;
-            return matchPayer && matchCategory;
-          });
-        }
-      };
-    };
-
-    // 啟動雙重守衛註冊組件 (與 DOM 同步)
-    document.addEventListener('alpine:init', () => {
-      Alpine.data('splitApp', window.splitAppComponent);
-    });
-  </script>
-
-  <!-- 3. 僅載入一次 Alpine JS 框架，彻底避免重複載入崩潰 -->
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
-
-  <!-- 4. 採用 ES2020 動態 import () 載入 Firebase 模組，徹底預防斷網或 CSP 沙盒安全策略攔截時產生 Script Error 卡死網頁 -->
-  <script type="module">
-    // 讀取持久化配置參數
-    const firebaseConfig = typeof __firebase_config !== 'undefined' 
-      ? JSON.parse(__firebase_config) 
-      : {
-          apiKey: "",
-          authDomain: "",
-          projectId: "",
-          storageBucket: "",
-          messagingSenderId: "",
-          appId: ""
-        };
-    const appId = window.getAppId(); // 動態使用最穩定的全域 getAppId 方法
-
-    (async () => {
-      try {
-        // 動態安全載入
-        const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-        const { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-        const { getFirestore, doc, setDoc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-
-        if (!firebaseConfig || !firebaseConfig.projectId) return;
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
-        // 登入：安全防護與自動降級匿名登入機制 (解決 Token 逾時造成的權限拒絕)
-        try {
-          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            try {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } catch (tokenErr) {
-              await signInAnonymously(auth);
-            }
-          } else {
-            await signInAnonymously(auth);
-          }
-        } catch (err) {
-          console.warn("Firebase Auth bypassed:", err);
-        }
-
-        // 定義全域儲存命令 (嚴格遵守路徑規範 1 與認證守衛 3)
-        window.saveLedgerToCloud = async () => {
-          const inst = window.ledgerAlpineInstance;
-          if (!inst || !auth || !auth.currentUser) return; // 認證守衛
-          inst.syncing = true;
-          try {
-            const currentAppId = window.getAppId();
-            // 嚴格依循 /artifacts/{appId}/public/data/{collectionName}/{documentId}
-            const docRef = doc(db, 'artifacts', currentAppId, 'public', 'data', 'ledgers', inst.roomId);
-            await setDoc(docRef, {
-              members: JSON.parse(JSON.stringify(inst.members)),
-              rates: JSON.parse(JSON.stringify(inst.rates)),
-              expenses: JSON.parse(JSON.stringify(inst.expenses)),
-              lastUpdated: Date.now()
-            });
-          } catch (err) {
-            console.error("Write to cloud failed:", err);
-          } finally {
-            inst.syncing = false;
-          }
-        };
-
-        let unsubscribeSnapshot = null;
-
-        window.triggerFirebaseSnapshotInit = (alpineInst) => {
-          if (!auth || !db || !alpineInst) return;
-          
-          if (unsubscribeSnapshot) {
-            unsubscribeSnapshot(); // 清除舊房間的 snapshot 監聽，防止記憶體洩漏與重複覆蓋
-            unsubscribeSnapshot = null;
-          }
-
-          alpineInst.currentUser = auth.currentUser;
-          alpineInst.appId = window.getAppId();
-          
-          const currentAppId = window.getAppId();
-          const docRef = doc(db, 'artifacts', currentAppId, 'public', 'data', 'ledgers', alpineInst.roomId);
-          
-          // 監聽器安全與錯誤回調設置，防止無權限時卡死
-          unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const cloudData = docSnap.data();
-              
-              // 響應式自動渲染：這一步保證當點擊送出、其他裝置更新或重整網頁時，資料自動一秒同步
-              alpineInst.members = cloudData.members || [];
-              alpineInst.rates = cloudData.rates || alpineInst.rates;
-              alpineInst.expenses = cloudData.expenses || [];
-
-              // 同步修正表單預設參與人
-              if (alpineInst.expenseForm.participants.length === 0 && alpineInst.members.length > 0) {
-                alpineInst.expenseForm.participants = [...alpineInst.members];
-              }
-              if (!alpineInst.expenseForm.payer && alpineInst.members.length > 0) {
-                alpineInst.expenseForm.payer = alpineInst.members[0];
-              }
-            } else {
-              // 如果此房間還不存在（例如第一次建立），直接初始化雲端文件
-              window.saveLedgerToCloud();
-            }
-          }, (err) => {
-            console.error("Firebase Room Snapshot Error:", err);
-          });
-        };
-
-        onAuthStateChanged(auth, (user) => {
-          const inst = window.ledgerAlpineInstance;
-          if (inst) {
-            inst.currentUser = user;
-            inst.appId = window.getAppId();
-            if (user) {
-              window.triggerFirebaseSnapshotInit(inst);
-            }
-          }
         });
 
-      } catch (err) {
-        console.warn("Cloud service unavailable, app continues in robust offline fallback mode.");
+        const memberSummaries = computed(() => billingCalculation.value.memberSummaries);
+        const transactions = computed(() => billingCalculation.value.transactions);
+
+        return {
+          user,
+          roomId,
+          roomData,
+          loading,
+          syncing,
+          inputRoomId,
+          newMemberName,
+          expTitle,
+          expAmount,
+          expPayer,
+          expParticipants,
+          toast,
+          memberSummaries,
+          transactions,
+          handleCreateRoom,
+          handleJoinRoom,
+          handleExitRoom,
+          handleAddMember,
+          handleDeleteMember,
+          handleAddExpense,
+          handleDeleteExpense,
+          handleCopyInviteLink,
+          handleSelectAllParticipants,
+          handleClearParticipants
+        };
       }
-    })();
+    }).mount('#app');
   </script>
 
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    }
-    .scrollbar-none::-webkit-scrollbar {
-      display: none;
-    }
-    .scrollbar-none {
-      -ms-overflow-style: none;
-      scrollbar-width: none;
-    }
-    .backdrop-blur-sm {
-      -webkit-backdrop-filter: blur(4px);
-      backdrop-filter: blur(4px);
-    }
-  </style>
-</head>
-<body class="min-h-screen bg-gray-50 text-gray-800 font-sans pb-16" x-data="splitApp">
-
-  <!-- 導覽列：高清晰對比面板 -->
-  <header class="bg-gray-900 text-white shadow-md sticky top-0 z-40 border-b border-gray-800">
-    <div class="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-      <div class="flex items-center gap-3">
-        <span class="text-3xl shrink-0">⚖️</span>
-        <div>
-          <h1 class="text-2xl font-black tracking-wider text-white">
-            作伙算 
-            <span class="text-[10px] bg-green-600 text-white px-2 py-0.5 rounded-full ml-1 font-bold">HKD 港幣本位</span>
-          </h1>
-          <p class="text-xs text-gray-300 font-medium">親友團體旅遊・支援多幣別分帳與即時雲端</p>
-        </div>
-      </div>
-      <!-- 右側資訊 (顯示當前獨享房間，親人只要輸入相同房間即可即時共看！) -->
-      <div class="flex flex-col items-center sm:items-end gap-1 shrink-0">
-        <div class="flex flex-wrap justify-center items-center gap-2 bg-gray-800 border border-gray-700 px-4 py-1.5 rounded-full text-xs">
-          <span class="text-gray-300">🔑 帳本房間：</span>
-          <span class="font-black text-yellow-300 text-sm tracking-wider" x-text="roomId"></span>
-          <span class="text-gray-600 px-0.5">|</span>
-          <span class="text-gray-300">👥 成員：</span>
-          <span class="font-black text-yellow-300 text-sm" x-text="getMembersCountText()"></span>
-          <span class="text-gray-600 px-0.5">|</span>
-          <span class="text-gray-300">💰 總支出：</span>
-          <span class="font-black text-yellow-300 text-sm" x-text="getTotalSpendingText()"></span>
-        </div>
-        <div class="text-[9px] text-gray-500 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full inline-block animate-ping bg-green-500"></span>
-          <span>
-            <span x-text="currentUser ? '雲端共享房間已同步' : '本地暫存模式'"></span>
-            <span x-show="currentUser"> | 連結正常 </span>
-          </span>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <!-- 客製化通知訊息 (Toast) -->
-  <div class="fixed top-24 right-4 z-50 space-y-2 pointer-events-none">
-    <div x-show="toast.show" class="px-5 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce pointer-events-auto"
-         :class="toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'" style="display: none;">
-      <span x-text="toast.type === 'error' ? '⚠️' : '✅'"></span>
-      <span x-text="toast.message"></span>
-    </div>
-  </div>
-
-  <!-- 客製化確認對話框 (100% 穩定，手機 Safari 全新修復) -->
-  <div x-show="confirmModal.show" class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50" style="display: none;">
-    <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-gray-100">
-      <div class="text-center">
-        <span class="text-4xl shrink-0">⚠️</span>
-        <h3 class="text-lg font-bold text-gray-800 mt-2" x-text="confirmModal.title">確認操作</h3>
-        <p class="text-gray-500 text-sm mt-2" x-text="confirmModal.message"></p>
-      </div>
-      <div class="flex gap-3 mt-6">
-        <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-slate-700 font-bold text-sm transition-all">
-          取消
-        </button>
-        <button @click="executeConfirm()" class="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm transition-all shadow-md">
-          確定
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 主要內容區 -->
-  <main class="max-w-6xl mx-auto px-4 mt-6">
-    
-    <!-- 分頁選單 -->
-    <div class="flex bg-white p-1 rounded-xl shadow-sm mb-6 border border-gray-200 overflow-x-auto scrollbar-none">
-      <button 
-        @click="activeTab = 'settlement'" 
-        class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'settlement' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-      >
-        📊 結算對帳
-      </button>
-      <button 
-        @click="activeTab = 'expenses'" 
-        class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'expenses' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-      >
-        📝 支出明細
-      </button>
-      <button 
-        @click="activeTab = 'add'" 
-        class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'add' ? 'bg-teal-600 text-white shadow font-extrabold' : 'text-gray-600 hover:bg-gray-100'"
-      >
-        ➕ 新增支出
-      </button>
-      <button 
-        @click="activeTab = 'members'" 
-        class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'members' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-      >
-        👥 成員維護
-      </button>
-      <button 
-        @click="activeTab = 'backup'" 
-        class="flex-1 shrink-0 min-w-[95px] py-2.5 px-3 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
-        :class="activeTab === 'backup' ? 'bg-teal-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-      >
-        💾 雲端備份
-      </button>
-    </div>
-
-    <!-- --- 分頁5：雲端設定與資料備份 --- -->
-    <div x-show="activeTab === 'backup'" class="space-y-6" style="display: none;">
-      
-      <!-- A. 跨裝置「共享房間」設定 (Firestore) -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 space-y-4">
-        <div class="flex items-center gap-2 border-b pb-3 border-gray-100">
-          <span class="text-2xl">🔗</span>
-          <h2 class="text-lg font-bold text-gray-800">多人即時同步「共享帳本房間」</h2>
-        </div>
-        <p class="text-xs text-gray-500">
-          「作伙算」會將您的記帳資料儲存在雲端房間中。不論用手機、平板還是重新整理，只要**房間號碼一致**，所有人手機上的資料都會毫秒級即時同步！
-        </p>
-        
-        <div class="bg-gray-50 p-4 rounded-xl space-y-3">
-          <div class="flex justify-between items-center">
-            <span class="text-xs font-bold text-gray-500">您的專屬共享房間號碼：</span>
-            <span class="text-lg font-black text-teal-600 tracking-wider" x-text="roomId"></span>
-          </div>
-          <div class="text-[10px] text-gray-400 bg-white p-2 rounded border border-gray-100">
-            📌 <b>分享方法：</b>只要複製您瀏覽器頂部的網址（包含 <code>#room=XXXX</code>），直接透過 LINE / WeChat 傳給親友，他們打開即可即時看帳與記帳！
-          </div>
-        </div>
-
-        <!-- 輸入房間加入 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-          <div>
-            <label class="block text-xs font-bold text-gray-500 mb-1">加入已有房間 (輸入親友的房間號)：</label>
-            <div class="flex gap-2">
-              <input 
-                type="text" 
-                placeholder="例如: ROOM-1234" 
-                x-model="inputRoomId"
-                class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-sm font-bold text-gray-800 outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
-              />
-              <button 
-                type="button" 
-                @click="joinExistingRoom()"
-                class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all shadow-xs"
-              >加入</button>
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-gray-500 mb-1">建立新獨立房間：</label>
-            <button 
-              type="button"
-              @click="roomId = 'ROOM-' + Math.floor(1000 + Math.random() * 9000); window.location.hash = 'room=' + roomId; triggerSave(); showToast('success', '已重新建立全新乾淨帳本！');"
-              class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 px-4 rounded-xl text-sm transition-all border border-gray-200"
-            >
-              🔄 建立全新獨立帳本
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- B. 本地手動備份防護區 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center gap-2 mb-4 border-b pb-3">
-          <span class="text-2xl">📦</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">手動導出/導入備份檔案</h2>
-        </div>
-        <p class="text-xs text-gray-500 mb-4">您可以隨時匯出整本帳單的 JSON 數據存放在電腦或傳送給 LINE 群組：</p>
-        
-        <div class="flex flex-wrap gap-3">
-          <button 
-            type="button"
-            @click="const json = JSON.stringify({members, rates, expenses}, null, 2); const blob = new Blob([json], {type: 'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '作伙算分帳數據_' + new Date().toISOString().split('T')[0] + '.json'; a.click(); showToast('success', '已下載本地 JSON 備份檔！')"
-            class="px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
-          >
-            📥 匯出並下載數據 (JSON)
-          </button>
-          
-          <label class="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl text-xs font-bold border border-teal-200 cursor-pointer transition-all flex items-center">
-            <span>📤 匯入備份數據 (JSON)</span>
-            <input 
-              type="file" 
-              accept=".json" 
-              class="hidden" 
-              @change="
-                const file = $event.target.files[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = async (e) => {
-                    try {
-                      const data = JSON.parse(e.target.result);
-                      if (data.members && data.expenses) {
-                        members = data.members;
-                        rates = data.rates || rates;
-                        expenses = data.expenses;
-                        showToast('success', '帳目數據匯入成功！');
-                        await triggerSave();
-                      } else {
-                        showToast('error', '匯入失敗：檔案格式不相容！');
-                      }
-                    } catch(err) {
-                      showToast('error', '解析 JSON 失敗！');
-                    }
-                  };
-                  reader.readAsText(file);
-                }
-              "
-            />
-          </label>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- --- 分頁1：結算對帳 (預設首頁) --- -->
-    <div x-show="activeTab === 'settlement'" class="space-y-6">
-      
-      <!-- 匯率管理面板 (摺疊式) -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        <button 
-          @click="showRateSettings = !showRateSettings" 
-          class="w-full px-6 py-4 flex items-center justify-between bg-gray-50 hover:bg-slate-100 transition-colors border-b border-gray-100 text-left"
-        >
-          <div class="flex items-center gap-2">
-            <span class="text-xl shrink-0">⚙️</span>
-            <span class="font-bold text-gray-700 text-sm sm:text-base">自訂匯率設定 (基準貨幣：港幣 HKD)</span>
-          </div>
-          <span class="text-xs text-teal-600 font-bold shrink-0" x-text="showRateSettings ? '▲ 收合設定' : '▼ 展開設定'"></span>
-        </button>
-        
-        <div x-show="showRateSettings" class="p-4 sm:p-6 bg-white space-y-4" x-transition>
-          <p class="text-xs text-gray-500">請設定 <b>1 單位外幣折合多少港幣 (HKD)</b>：</p>
-          <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
-            <div>
-              <label class="block text-xs font-bold text-gray-500 mb-1">1 TWD (新台幣)</label>
-              <input type="number" step="0.0001" x-model.number="rates.TWD" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-500 mb-1">1 JPY (日圓)</label>
-              <input type="number" step="0.0001" x-model.number="rates.JPY" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-500 mb-1">1 USD (美金)</label>
-              <input type="number" step="0.01" x-model.number="rates.USD" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-500 mb-1">1 CNY (人民幣)</label>
-              <input type="number" step="0.01" x-model.number="rates.CNY" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
-            </div>
-            <div class="col-span-2 sm:col-span-1">
-              <label class="block text-xs font-bold text-gray-500 mb-1">1 EUR (歐元)</label>
-              <input type="number" step="0.01" x-model.number="rates.EUR" @change="triggerSave()" class="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-base sm:text-sm font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
-            </div>
-          </div>
-          <div class="text-right">
-            <span class="text-[10px] text-gray-400 bg-gray-100 px-2 py-1 rounded">💡 調整數值後自動即時同步儲存</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 核心對帳卡片 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center gap-2 mb-4 border-b pb-3">
-          <span class="text-2xl shrink-0">⚡</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">智慧分帳方案 (最省事還款路徑)</h2>
-        </div>
-
-        <!-- 均已使用 x-show 替代 x-if 進行切換 -->
-        <div x-show="settlementPlans.length === 0" class="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-          <span class="text-4xl animate-bounce">🎉</span>
-          <p class="mt-2 text-gray-500 font-semibold">目前無任何欠款，大家都結清囉！</p>
-          <p class="text-xs text-gray-400 mt-1">當您開始新增帳目，系統會自動轉換為港幣並算出最適還款方案。</p>
-        </div>
-
-        <div x-show="settlementPlans.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6" style="display: none;">
-          <!-- 還款步驟 -->
-          <div class="space-y-3">
-            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">建議轉帳步驟：</h3>
-            <div class="space-y-3">
-              <template x-for="(plan, index) in settlementPlans" :key="index">
-                <div class="flex items-center justify-between p-3.5 bg-gradient-to-r from-gray-50 to-teal-55 border border-gray-200 rounded-xl shadow-sm hover:border-teal-300 transition-colors">
-                  <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-                    <div class="flex items-center gap-1.5 min-w-0">
-                      <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(plan.from)" x-text="plan.from[0]"></span>
-                      <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.from"></span>
-                    </div>
-                    
-                    <span class="text-gray-400 text-[10px] sm:text-xs px-1.5 py-0.5 bg-gray-100 rounded shrink-0">匯款給</span>
-                    
-                    <div class="flex items-center gap-1.5 min-w-0">
-                      <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(plan.to)" x-text="plan.to[0]"></span>
-                      <span class="font-semibold text-gray-700 text-sm truncate" x-text="plan.to"></span>
-                    </div>
-                  </div>
-
-                  <div class="text-right shrink-0 ml-2">
-                    <span class="text-base sm:text-lg font-black text-green-600" x-text="'HK$ ' + plan.amount.toLocaleString()"></span>
-                    <span class="text-[10px] text-gray-400 block">港幣</span>
-                  </div>
-                </div>
-              </template>
-            </div>
-            
-            <div class="p-3 bg-blue-50 text-blue-800 text-xs rounded-lg mt-4 flex items-start gap-2">
-              <span>💡</span>
-              <p><b>提示：</b>本系統採用最優簡化演算法。不論親友們旅途中支付的是何種貨幣，最終只需依照上方指示以<b>港幣</b>進行轉帳，即可一次性結清所有人之間的債務！</p>
-            </div>
-          </div>
-
-          <!-- 所有人結算明細 -->
-          <div class="bg-gray-50 p-4 sm:p-5 rounded-xl border border-gray-200">
-            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">所有人當前結算明細 (折合港幣)：</h3>
-            <div class="space-y-3">
-              <template x-for="member in members" :key="member">
-                <div class="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(member)"></span>
-                    <div class="min-w-0 flex-1">
-                      <span class="font-bold text-gray-700 text-sm block truncate" x-text="member"></span>
-                      <span class="text-[10px] text-gray-400 block truncate" x-text="getMemberBalanceDetailText(member)"></span>
-                    </div>
-                  </div>
-
-                  <div class="text-right shrink-0 ml-2">
-                    <span x-show="getMemberNetBalance(member) > 0.01" class="text-green-600 font-bold text-[11px] sm:text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100" x-text="'應收回 HK$ ' + Math.round(getMemberNetBalance(member)).toLocaleString()"></span>
-                    <span x-show="getMemberNetBalance(member) < -0.01" class="text-red-600 font-bold text-[11px] sm:text-xs bg-red-50 px-2 py-1 rounded-full border border-red-100" x-text="'需支付 HK$ ' + Math.round(Math.abs(getMemberNetBalance(member))).toLocaleString()"></span>
-                    <span x-show="Math.abs(getMemberNetBalance(member)) <= 0.01" class="text-gray-400 text-xs sm:text-sm font-semibold">已結清</span>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 成員快速狀態與統計卡片 -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
-          <div class="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center text-2xl shrink-0">💰</div>
-          <div>
-            <h4 class="text-sm font-semibold text-gray-400">活動總開銷 (港幣)</h4>
-            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="getTotalSpendingText()"></p>
-          </div>
-        </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
-          <div class="w-12 h-12 bg-teal-100 rounded-full flex items-center justify-center text-2xl shrink-0">🙋‍♂️</div>
-          <div>
-            <h4 class="text-sm font-semibold text-gray-400">平均每人消費 (港幣)</h4>
-            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="getAverageSpendingText()"></p>
-          </div>
-        </div>
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-4">
-          <div class="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center text-2xl shrink-0">🧾</div>
-          <div>
-            <h4 class="text-sm font-semibold text-gray-400">總消費筆數</h4>
-            <p class="text-xl sm:text-2xl font-black text-gray-800" x-text="expenses.length + ' 筆'"></p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- --- 分頁2：支出明細 --- -->
-    <div x-show="activeTab === 'expenses'" class="space-y-6" style="display: none;">
-      <!-- 篩選與工具列 (手機觸控友善優化：不使用不穩定的 select 模板) -->
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
-        <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
-          <span class="text-xs text-gray-500 font-bold shrink-0">🔍 依付款人過濾：</span>
-          <div class="flex flex-wrap gap-1.5">
-            <button 
-              type="button"
-              @click="filterPayer = 'all'"
-              class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all"
-              :class="filterPayer === 'all' ? 'bg-teal-600 text-white border-teal-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
-            >所有付款人</button>
-            <template x-for="m in members" :key="m">
-              <button 
-                type="button"
-                @click="filterPayer = m"
-                class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all flex items-center gap-1 min-w-0"
-                :class="filterPayer === m ? 'bg-teal-600 text-white border-teal-600 shadow-xs' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
-              >
-                <span class="w-3.5 h-3.5 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0" :style="getMemberStyle(m)" x-text="m[0]"></span>
-                <span class="truncate max-w-[70px]" x-text="m"></span>
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <div class="flex flex-col sm:flex-row gap-3 sm:items-center border-t border-gray-100 pt-3">
-          <span class="text-xs text-gray-500 font-bold shrink-0">🏷️ 依消費類別過濾：</span>
-          <div class="flex flex-wrap gap-1.5">
-            <button 
-              type="button"
-              @click="filterCategory = 'all'"
-              class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all"
-              :class="filterCategory === 'all' ? 'bg-teal-600 text-white border-teal-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
-            >所有類別</button>
-            <template x-for="cat in categories" :key="cat.id">
-              <button 
-                type="button"
-                @click="filterCategory = cat.id"
-                class="px-2.5 py-1 rounded-full text-xs font-bold border transition-all flex items-center gap-1"
-                :class="filterCategory === cat.id ? 'bg-teal-600 text-white border-teal-600 shadow-xs' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
-              >
-                <span x-text="cat.icon"></span>
-                <span x-text="cat.name"></span>
-              </button>
-            </template>
-          </div>
-        </div>
-      </div>
-
-      <!-- 帳目列表 -->
-      <div class="space-y-4">
-        <div x-show="filteredExpenses.length === 0" class="bg-white rounded-2xl p-12 text-center border border-gray-200">
-          <span class="text-5xl block mb-2">🔍</span>
-          <p class="text-gray-500 font-bold">找不到符合條件的消費紀錄！</p>
-          <p class="text-gray-400 text-sm mt-1">您可以嘗試調整篩選條件，或是點選上方「新增支出」開始記帳。</p>
-        </div>
-
-        <div x-show="filteredExpenses.length > 0" class="space-y-4" style="display: none;">
-          <template x-for="exp in filteredExpenses" :key="exp.id">
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <!-- 支出基本資訊 -->
-              <div class="flex items-start gap-3.5 min-w-0">
-                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm shrink-0 border" 
-                     :class="getCategoryObj(exp.category).color" 
-                     x-text="getCategoryObj(exp.category).icon">
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <h3 class="font-bold text-gray-800 text-base sm:text-lg truncate break-all max-w-[200px] sm:max-w-none" x-text="exp.description"></h3>
-                    <span class="text-[10px] sm:text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium" x-text="getCategoryObj(exp.category).name"></span>
-                  </div>
-                  
-                  <div class="text-gray-500 text-[11px] sm:text-xs mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <span>📅 日期：<b x-text="exp.date"></b></span>
-                    <span>👤 付款人：<strong class="text-teal-600" x-text="exp.payer"></strong></span>
-                    <span>分攤：<b x-text="exp.splitType === 'equal' ? '全員均分' : '自訂金額'"></b></span>
-                  </div>
-
-                  <!-- 分攤人細節 -->
-                  <div class="mt-3">
-                    <span class="text-[10px] text-gray-400 block mb-1" x-text="getParticipantsCountText(exp)"></span>
-                    <div class="flex flex-wrap gap-1.5">
-                      <template x-for="p in exp.participants" :key="p">
-                        <span class="inline-flex items-center gap-1 text-[11px] sm:text-xs bg-slate-50 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-md">
-                          <span class="w-2 h-2 rounded-full shrink-0" :style="getMemberStyle(p)"></span>
-                          <span x-text="p"></span>
-                          <span class="text-[10px] text-gray-400 font-semibold" x-text="getParticipantShareText(exp, p)"></span>
-                        </span>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 金額與刪除按鈕 -->
-              <div class="flex items-center justify-between md:flex-col md:items-end gap-2 pt-3 border-t md:pt-0 md:border-t-0 border-gray-100">
-                <div class="text-left md:text-right">
-                  <span class="text-xl sm:text-2xl font-black text-gray-800" x-text="getCurrencySymbol(exp.currency) + ' ' + exp.amount.toLocaleString()"></span>
-                  <span class="text-xs text-teal-600 font-bold block" x-text="getConvertedHKDText(exp)"></span>
-                  <template x-if="exp.currency !== 'HKD'">
-                    <span class="text-[9px] text-gray-400 block" x-text="getRateText(exp)"></span>
-                  </template>
-                </div>
-                
-                <button
-                  @click="askDeleteExpense(exp.id)"
-                  class="bg-red-50 hover:bg-red-100 text-red-600 p-2 rounded-lg transition-all border border-red-200 text-xs flex items-center gap-1 font-bold"
-                  title="刪除此帳目"
-                >
-                  🗑️ 刪除
-                </button>
-              </div>
-            </div>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <!-- --- 分頁3：新增支出 --- -->
-    <div x-show="activeTab === 'add'" class="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6" style="display: none;">
-      <div class="flex items-center gap-2 mb-6 border-b pb-3">
-        <span class="text-2xl shrink-0">✍️</span>
-        <h2 class="text-lg sm:text-xl font-bold text-gray-800">登記一筆新支出</h2>
-      </div>
-
-      <form @submit.prevent="handleAddExpense()" class="space-y-5">
-        
-        <!-- 1. 項目名稱 & 幣別 -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div class="sm:col-span-1">
-            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費幣別 <span class="text-red-500">*</span></label>
-            <select
-              x-model="expenseForm.currency"
-              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
-            >
-              <option value="HKD">HKD (港幣)</option>
-              <option value="TWD">TWD (新台幣)</option>
-              <option value="JPY">JPY (日圓)</option>
-              <option value="USD">USD (美金)</option>
-              <option value="CNY">CNY (人民幣)</option>
-              <option value="EUR">EUR (歐元)</option>
-            </select>
-          </div>
-          <div class="sm:col-span-2">
-            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費項目名稱 <span class="text-red-500">*</span></label>
-            <input 
-              type="text"
-              required
-              placeholder="例如：台北計程車、大阪晚餐、代購"
-              x-model="expenseForm.description"
-              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-base sm:text-sm text-gray-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
-            />
-          </div>
-        </div>
-
-        <!-- 2. 金額與即時折合港幣顯示 -->
-        <div>
-          <label class="block text-sm font-bold text-gray-600 mb-1.5">支出金額 <span class="text-red-500">*</span></label>
-          <div class="relative">
-            <span class="absolute left-4 top-2.5 text-gray-400 font-bold" x-text="getCurrencySymbol(expenseForm.currency)"></span>
-            <input 
-              type="number"
-              required
-              min="0.1"
-              step="any"
-              placeholder="0.00"
-              x-model="expenseForm.amount"
-              class="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-2.5 text-base sm:text-lg text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition-all"
-            />
-          </div>
-          <div x-show="expenseForm.currency !== 'HKD' && Number(expenseForm.amount) > 0" class="mt-2 text-xs text-teal-600 font-bold bg-teal-50 p-2 rounded-lg border border-teal-100 inline-block" x-text="getEstimatedHKDText()"></div>
-        </div>
-
-        <!-- 3. 付款人 (圓形頭像按鈕網格) -->
-        <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
-          <label class="block text-sm font-bold text-gray-600 mb-2">誰付的錢？ <span class="text-red-500">*</span></label>
-          <div class="flex flex-wrap gap-2">
-            <template x-for="m in members" :key="m">
-              <button
-                type="button"
-                @click="expenseForm.payer = m"
-                class="flex items-center gap-1.5 px-3 py-2 rounded-full border-2 transition-all font-bold text-xs"
-                :class="expenseForm.payer === m ? 'border-teal-500 bg-teal-50 text-teal-800 shadow-xs' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'"
-              >
-                <span class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0 animate-pulse-once" :style="getMemberStyle(m)" x-text="m[0]"></span>
-                <span x-text="m"></span>
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <!-- 4. 分類 & 日期 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費類別</label>
-            <select
-              x-model="expenseForm.category"
-              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-bold focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
-            >
-              <option value="food">🍔 餐飲美食</option>
-              <option value="transport">🚗 交通出行</option>
-              <option value="lodging">🏨 住宿飯店</option>
-              <option value="entertainment">🎟️ 娛樂門票</option>
-              <option value="shopping">🛍️ 購物血拼</option>
-              <option value="other">📦 其他雜項</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-sm font-bold text-gray-600 mb-1.5">消費日期</label>
-            <input 
-              type="date"
-              x-model="expenseForm.date"
-              class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
-            />
-          </div>
-        </div>
-
-        <!-- 5. 分帳方式 -->
-        <div>
-          <label class="block text-sm font-bold text-gray-600 mb-1.5">分攤機制 (以輸入幣別分攤)</label>
-          <div class="flex gap-4">
-            <label class="flex-1 flex items-center justify-center gap-2 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-colors font-bold text-sm bg-white border-gray-200">
-              <input 
-                type="radio" 
-                name="splitType" 
-                value="equal" 
-                x-model="expenseForm.splitType"
-                class="text-teal-600 focus:ring-teal-500" 
-              />
-              <span>指定成員 均分</span>
-            </label>
-            <label class="flex-1 flex items-center justify-center gap-2 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-colors font-bold text-sm bg-white border-gray-200">
-              <input 
-                type="radio" 
-                name="splitType" 
-                value="custom" 
-                x-model="expenseForm.splitType"
-                class="text-teal-600 focus:ring-teal-500" 
-              />
-              <span>不均等指定金額</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- 6. 參與分攤成員名單 (利用 Alpine 的極簡自動化 x-model 雙向綁定陣列) -->
-        <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
-          <div class="flex justify-between items-center mb-3">
-            <span class="text-sm font-bold text-gray-600">誰參與這筆開銷？</span>
-            <div class="flex gap-2">
-              <button type="button" @click="selectAllParticipants()" class="text-xs text-teal-600 hover:underline font-bold">全選</button>
-              <span class="text-gray-300 text-xs">|</span>
-              <button type="button" @click="clearAllParticipants()" class="text-xs text-slate-500 hover:underline font-bold">全不選</button>
-            </div>
-          </div>
-
-          <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
-            <template x-for="member in members" :key="member">
-              <div class="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100 shadow-sm">
-                <!-- 雙向綁定 -->
-                <label class="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
-                  <input 
-                    type="checkbox"
-                    :value="member"
-                    x-model="expenseForm.participants"
-                    class="rounded text-teal-600 focus:ring-teal-500 w-4 h-4 shrink-0"
-                  />
-                  <span class="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0 shadow-xs" :style="getMemberStyle(member)" x-text="member[0]"></span>
-                  <span class="font-semibold text-gray-700 text-sm truncate" x-text="member"></span>
-                </label>
-
-                <!-- 如果是不均等分帳，顯示金額輸入框 (改用 x-show 徹底杜絕 nesting templates _x_dataStack null bug) -->
-                <div x-show="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)" class="flex items-center gap-1 shrink-0 ml-2">
-                  <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
-                  <input 
-                    type="number"
-                    placeholder="金額"
-                    x-model.number="expenseForm.customAmounts[member]"
-                    class="w-20 text-right bg-gray-50 border border-gray-200 rounded px-2 py-1 text-base sm:text-xs font-bold font-sans"
-                  />
-                </div>
-              </div>
-            </template>
-          </div>
-          
-          <!-- 平分計算提示 -->
-          <div x-show="expenseForm.splitType === 'equal' && expenseForm.participants.length > 0 && Number(expenseForm.amount) > 0" class="mt-3 text-right text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold space-y-1">
-            <div>
-              預估每人分攤：
-              <span class="text-teal-600 font-bold text-sm" x-text="getEstimatedShareText()"></span>
-            </div>
-            <div x-show="expenseForm.currency !== 'HKD'" class="text-gray-400 text-[11px]" x-text="getEstimatedShareHKDText()"></div>
-          </div>
-
-          <!-- 不等分計算提示 -->
-          <div x-show="expenseForm.splitType === 'custom'" class="mt-3 flex justify-between items-center text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold">
-            <span>
-              已分配總和：
-              <strong class="text-gray-700" x-text="sumCustomAmounts() + ' ' + expenseForm.currency"></strong>
-            </span>
-            <span>
-              剩餘未分配：
-              <strong :class="isCustomAllocationValid() ? 'text-green-600' : 'text-red-500'" x-text="getRemainingAmountText()"></strong>
-            </span>
-          </div>
-        </div>
-
-        <!-- 7. 儲存按鈕 -->
-        <button 
-          type="submit"
-          class="w-full bg-gradient-to-r from-teal-600 to-green-600 text-white font-extrabold py-3.5 px-4 rounded-xl shadow-md hover:from-teal-700 hover:to-green-700 transition-all flex items-center justify-center gap-2"
-        >
-          <span>💾</span> 儲存這筆開銷
-        </button>
-
-      </form>
-    </div>
-
-    <!-- --- 分頁4：成員維護 (核心修復：全面加入行內編輯更名與最安全的手機刪除觸發) --- -->
-    <div x-show="activeTab === 'members'" class="max-w-2xl mx-auto space-y-6" style="display: none;">
-      <!-- 新增成員 -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <div class="flex items-center gap-2 mb-4 border-b pb-3">
-          <span class="text-2xl shrink-0">👥</span>
-          <h2 class="text-lg sm:text-xl font-bold text-gray-800">成員名單管理</h2>
-        </div>
-
-        <form @submit.prevent="handleAddMember()" class="flex gap-2">
-          <input 
-            type="text"
-            required
-            placeholder="輸入新朋友或親人的名字"
-            x-model="newMemberName"
-            class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-base sm:text-sm text-gray-800 font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none"
-          />
-          <button 
-            type="submit"
-            class="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
-          >
-            ➕ 新增
-          </button>
-        </form>
-      </div>
-
-      <!-- 成員列表 (完全使用 x-show 替換 x-if，絕不留給瀏覽器解析空 document 標籤的空間) -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
-        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4" x-text="getMemberListTitle()"></h3>
-        
-        <div x-show="members.length === 0" class="text-center py-8 text-gray-400">
-          <span class="text-4xl block">🔍</span>
-          目無成員，請於上方欄位新增！
-        </div>
-
-        <div x-show="members.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <template x-for="member in members" :key="member">
-            <div class="flex items-center justify-between p-3.5 bg-gray-50 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
-              
-              <!-- [非編輯狀態下] 顯示正常頭像與姓名 (修復核心：使用正確的 getMemberStyle 頭像樣式，徹底移除無效的 class 渲染錯誤) -->
-              <div x-show="editingMemberName !== member" class="flex items-center justify-between w-full min-w-0">
-                <div class="flex items-center gap-3 min-w-0">
-                  <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0" :style="getMemberStyle(member)" x-text="member[0]"></span>
-                  <span class="font-bold text-gray-700 truncate" x-text="member"></span>
-                </div>
-                
-                <div class="flex items-center gap-1 shrink-0 ml-2">
-                  <!-- ✏️ 行內編輯更名按鈕 -->
-                  <button 
-                    type="button"
-                    @click="startEditMember(member)"
-                    class="text-xs text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1.5 rounded-lg border border-blue-200 font-bold transition-colors"
-                    title="更名成員"
-                  >
-                    ✏️ 更改
-                  </button>
-                  
-                  <!-- ❌ 穩定刪除按鈕 -->
-                  <button 
-                    type="button"
-                    @click="askDeleteMember(member)"
-                    class="text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2 py-1.5 rounded-lg border border-red-200 font-bold transition-colors shrink-0 ml-2"
-                    title="刪除成員"
-                  >
-                    ❌ 刪除
-                  </button>
-                </div>
-              </div>
-
-              <!-- [行內編輯狀態下] 轉化為輸入與儲存按鈕 -->
-              <div x-show="editingMemberName === member" class="flex items-center gap-2 w-full min-w-0">
-                <input 
-                  type="text" 
-                  x-model="editingMemberNewValue" 
-                  @keydown.enter="saveMemberRename(member)"
-                  class="flex-1 bg-white border-2 border-teal-500 rounded-xl px-3 py-1.5 text-base sm:text-sm font-bold text-gray-800 outline-none min-w-0" 
-                  placeholder="修改名字..."
-                />
-                <div class="flex gap-1 shrink-0">
-                  <button 
-                    type="button" 
-                    @click="saveMemberRename(member)" 
-                    class="bg-green-600 hover:bg-green-700 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-xs"
-                  >💾 存</button>
-                  <button 
-                    type="button" 
-                    @click="editingMemberName = null" 
-                    class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
-                  >取消</button>
-                </div>
-              </div>
-
-            </div>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <!-- 付款大戶排行榜 (與主功能深度融合) -->
-    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 mt-6">
-      <div class="flex items-center gap-2 mb-6 border-b pb-3">
-        <span class="text-2xl shrink-0">👑</span>
-        <h2 class="text-lg sm:text-xl font-bold text-gray-800">代墊款項貢獻排行榜 (港幣累計，誰出得最多)</h2>
-      </div>
-
-      <div x-show="statistics.totalSpending === 0" class="text-center py-12 text-gray-400">
-        目前無任何代墊數據。
-      </div>
-
-      <div x-show="statistics.totalSpending > 0" class="space-y-4" style="display: none;">
-        <template x-for="member in members" :key="member">
-          <div class="flex items-center gap-4">
-            <span class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" :style="getMemberStyle(member)" x-text="member[0]"></span>
-            
-            <div class="flex-1 min-w-0 space-y-1">
-              <div class="flex justify-between items-center text-sm">
-                <span class="font-bold text-gray-700 truncate" x-text="member"></span>
-                <span class="text-xs font-semibold text-gray-500 shrink-0 ml-2">
-                  累計代墊折合 <strong class="text-gray-800" x-text="getMemberPaidText(member)"></strong> 元
-                </span>
-              </div>
-              
-              <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                <div 
-                  class="bg-green-500 h-full rounded-full"
-                  :style="getMemberPaidWidthStyle(member)"
-                ></div>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- 底部功能說明 -->
-  <footer class="text-center text-gray-400 text-[11px] mt-12 px-4 py-4 border-t border-gray-200">
-    <p>© 2026 作伙算 - 多人團體分帳記帳系統 | 港幣 (HKD) 本位・支援多國貨幣匯率換算與即時雲端儲存</p>
-  </footer>
 </body>
 </html>
