@@ -1,1057 +1,1143 @@
 <!DOCTYPE html>
-<html lang="zh-Hant" class="h-full bg-slate-50">
+<html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>多人即時同步分帳計算器</title>
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    /* 防止 Vue 模板在載入完成前閃爍 */
-    [v-cloak] {
-      display: none !important;
-    }
-    /* 自訂滾動條樣式 */
-    .custom-scrollbar::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #cbd5e1;
-      border-radius: 4px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #94a3b8;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>即時多人分帳計算器</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
 </head>
-<body class="h-full text-slate-800 flex flex-col font-sans">
+<body class="min-h-screen flex flex-col text-slate-800">
 
-  <div id="app" v-cloak class="min-h-screen flex flex-col">
-    
-    <!-- Toast 提示訊息 -->
-    <transition
-      enter-active-class="transition ease-out duration-300"
-      enter-from-class="opacity-0 translate-y-2 sm:translate-y-0 sm:translate-x-2"
-      enter-to-class="opacity-100 translate-y-0 sm:translate-x-0"
-      leave-active-class="transition ease-in duration-200"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div v-if="toast.show" class="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center space-x-2"
-           :class="toast.type === 'success' ? 'bg-emerald-600 text-white' : (toast.type === 'error' ? 'bg-rose-600 text-white' : 'bg-amber-600 text-white')">
-        <span class="font-medium text-sm">{{ toast.message }}</span>
-      </div>
-    </transition>
-
-    <!-- ==========================================
-        載入中畫面
-        ========================================== -->
-    <div v-if="loading" class="flex flex-col items-center justify-center flex-grow bg-slate-50">
-      <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-600 mb-4"></div>
-      <p class="text-sm font-medium text-slate-600">正在初始化系統中...</p>
-    </div>
-
-    <!-- ==========================================
-        畫面 A：未加入群組（群組選擇首頁）
-        ========================================== -->
-    <div v-else-if="!roomId || !roomData" class="flex-grow flex items-center justify-center p-4">
-      <div class="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
-        <div class="bg-gradient-to-br from-emerald-600 to-teal-700 p-8 text-white text-center relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10"></div>
-          <div class="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full -ml-8 -mb-8"></div>
-          
-          <!-- Logo SVG -->
-          <div class="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl mb-4">
-            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 11h.01M12 7h.01M15 11h.01M15 7h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </div>
-          <h1 class="text-2xl font-bold tracking-tight">多人即時同步分帳</h1>
-          <p class="text-emerald-100 text-sm mt-1">免登入、跨裝置、無痛平攤所有開銷</p>
-        </div>
-
-        <div class="p-8 space-y-6">
-          <!-- 演示模式提示 (若未啟用雲端) -->
-          <div v-if="demoMode" class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-xs text-center">
-            ⚠️ 偵測到當前未配置雲端資料庫，已為您自動啟用<strong>「本機演示模式」</strong>，功能完全可用！
-          </div>
-
-          <!-- 新建群組 -->
-          <div class="text-center">
-            <button
-              @click="handleCreateRoom"
-              class="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-medium py-3.5 px-4 rounded-xl transition duration-200 shadow-md flex items-center justify-center space-x-2 text-sm"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-              </svg>
-              <span>建立全新分帳群組</span>
-            </button>
-            <p class="text-xs text-slate-400 mt-2">系統將為您生成專屬隨機密碼群組，點擊即可開啟</p>
-          </div>
-
-          <div class="relative flex py-2 items-center text-slate-300">
-            <div class="flex-grow border-t border-slate-200"></div>
-            <span class="flex-shrink mx-4 text-xs font-semibold text-slate-400">或者加入既有群組</span>
-            <div class="flex-grow border-t border-slate-200"></div>
-          </div>
-
-          <!-- 加入群組 -->
-          <form @submit.prevent="handleJoinRoom" class="space-y-3">
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">請輸入群組代碼</label>
-              <input
-                type="text"
-                placeholder="例如：A8B2CD"
-                v-model="inputRoomId"
-                class="w-full uppercase text-center font-mono font-bold tracking-widest bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 focus:placeholder-transparent focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 rounded-xl py-3 px-4 outline-none transition-all duration-200"
-              />
+    <!-- 頂部導覽列 -->
+    <header class="bg-indigo-600 text-white shadow-md sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-white text-indigo-600 p-2 rounded-lg shadow-inner">
+                    <i class="fa-solid fa-file-invoice-dollar text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-black tracking-wider">即時多人分帳計算器</h1>
+                    <p class="text-xs text-indigo-200">雲端同步 · 免費無廣告 · 最優化結帳</p>
+                </div>
             </div>
-            <button
-              type="submit"
-              class="w-full bg-slate-800 hover:bg-slate-900 active:bg-black text-white font-medium py-3.5 px-4 rounded-xl transition duration-200 shadow-sm flex items-center justify-center space-x-2 text-sm"
-            >
-              <span>進入群組</span>
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-              </svg>
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <!-- ==========================================
-        畫面 B：已進入群組（主工作區）
-        ========================================== -->
-    <div v-else class="flex-grow flex flex-col">
-      <!-- 頂部導覽列 -->
-      <header class="sticky top-0 z-30 bg-white border-b border-slate-100 shadow-sm px-4 py-3 md:px-6">
-        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path>
-              </svg>
-            </div>
-            <div>
-              <h2 class="text-lg font-bold tracking-tight">
-                多人即時分帳計算器 
-                <span v-if="demoMode" class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md ml-1 inline-block">演示模式</span>
-              </h2>
-              <div class="flex items-center space-x-2">
-                <span class="inline-block w-2.5 h-2.5 rounded-full animate-pulse" :class="demoMode ? 'bg-amber-500' : 'bg-emerald-500'"></span>
-                <span class="text-xs text-slate-500 font-medium">
-                  {{ demoMode ? '資料目前僅保存在本機記憶體' : (syncing ? '雲端同步中...' : '已與雲端同步完成') }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center flex-wrap gap-2">
-            <!-- 群組代碼 -->
-            <div class="bg-slate-100 text-slate-800 font-mono font-bold px-3 py-1.5 rounded-lg flex items-center space-x-2 border border-slate-200">
-              <span class="text-xs text-slate-400 font-sans">群組：</span>
-              <span class="tracking-widest text-sm">{{ roomId }}</span>
-              <button
-                @click="handleCopyInviteLink"
-                title="複製邀請連結"
-                class="text-slate-500 hover:text-emerald-600 transition p-0.5"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
-                </svg>
-              </button>
-            </div>
-
-            <!-- 分享按鈕 -->
-            <button
-              @click="handleCopyInviteLink"
-              class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs px-3 py-2 rounded-lg transition-colors flex items-center space-x-1"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path>
-              </svg>
-              <span>分享群組</span>
-            </button>
-
-            <!-- 退出按鈕 -->
-            <button
-              @click="handleExitRoom"
-              class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs px-3 py-2 rounded-lg transition-colors flex items-center space-x-1"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-              </svg>
-              <span>返回首頁</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <!-- 主體網格佈局 -->
-      <main class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow w-full">
-        
-        <!-- ==========================================
-            左欄 (3 cols): 成員管理
-            ========================================== -->
-        <section class="lg:col-span-3 space-y-6">
-          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
-              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-              </svg>
-              <span>成員管理</span>
-              <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">
-                {{ roomData.members.length }} 人
-              </span>
-            </h3>
-
-            <!-- 新增成員表單 -->
-            <form @submit.prevent="handleAddMember" class="flex gap-2 mb-4">
-              <input
-                type="text"
-                placeholder="新成員姓名"
-                v-model="newMemberName"
-                class="flex-grow bg-slate-50 border border-slate-200 text-sm placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition"
-              />
-              <button
-                type="submit"
-                class="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl px-4 py-2 text-sm font-semibold transition"
-              >
-                加入
-              </button>
-            </form>
-
-            <!-- 成員清單 -->
-            <div v-if="roomData.members.length === 0" class="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
-              尚未加入任何成員
-            </div>
-            <div v-else class="space-y-1 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-              <div
-                v-for="member in roomData.members"
-                :key="member"
-                class="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition group"
-              >
-                <span class="text-sm font-semibold text-slate-800">{{ member }}</span>
-                <button
-                  @click="handleDeleteMember(member)"
-                  title="刪除成員"
-                  class="text-slate-400 hover:text-rose-600 p-1 lg:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
-                >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                  </svg>
+            
+            <!-- 房間資訊與分享 -->
+            <div class="flex items-center bg-indigo-700/60 border border-indigo-500/30 px-3 py-1.5 rounded-full text-sm gap-2 w-full sm:w-auto justify-between sm:justify-start">
+                <span class="text-indigo-200 font-medium"><i class="fa-solid fa-house-laptop mr-1.5"></i>帳本 ID：</span>
+                <span id="roomIdDisplay" class="font-mono font-bold text-white tracking-wider mr-2">載入中...</span>
+                <button id="copyRoomBtn" class="bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1 active:scale-95 shadow">
+                    <i class="fa-regular fa-copy"></i> 複製連結
                 </button>
-              </div>
             </div>
-          </div>
-        </section>
+        </div>
+    </header>
 
-        <!-- ==========================================
-            中欄 (5 cols): 支出清單 & 新增支出
-            ========================================== -->
-        <section class="lg:col-span-5 space-y-6">
-          <!-- 新增支出區 -->
-          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
-              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span>記一筆支出</span>
-            </h3>
-
-            <div v-if="roomData.members.length === 0" class="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-              請先於左側新增成員，即可開始記帳！
+    <!-- 主內容區 -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        
+        <!-- 連線狀態指示燈 -->
+        <div class="mb-6 flex items-center justify-between bg-white px-4 py-3 rounded-xl shadow-sm border border-slate-100">
+            <div class="flex items-center gap-2">
+                <span id="syncIndicator" class="relative flex h-3.5 w-3.5">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500"></span>
+                </span>
+                <span id="syncStatusText" class="text-sm font-medium text-slate-500">正在連接雲端資料庫...</span>
             </div>
+            <div class="flex items-center gap-3">
+                <button onclick="window.location.reload()" class="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-medium transition">
+                    <i class="fa-solid fa-arrows-rotate animate-spin"></i> 強制重整
+                </button>
+                <span class="text-xs text-slate-400">|</span>
+                <button id="changeRoomBtn" class="text-xs text-rose-600 hover:text-rose-800 flex items-center gap-1 font-medium transition">
+                    <i class="fa-solid fa-right-from-bracket"></i> 切換帳本
+                </button>
+            </div>
+        </div>
+
+        <!-- 網頁主要格線系統 (左：成員 & 新增支出 ｜ 右：支出明細 & 結算建議) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            <form v-else @submit.prevent="handleAddExpense" class="space-y-4">
-              <div class="grid grid-cols-2 gap-3">
+            <!-- 左側控制面板 (佔 5 格) -->
+            <div class="lg:col-span-5 space-y-6">
+                
+                <!-- 1. 成員管理區塊 -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 transition-all hover:shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-users text-indigo-500"></i>
+                            成員名單 (<span id="memberCount">0</span>)
+                        </h2>
+                        <span class="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-md">必須至少有2人</span>
+                    </div>
+
+                    <!-- 新增成員輸入框 -->
+                    <form id="addMemberForm" class="flex gap-2 mb-4">
+                        <div class="relative flex-grow">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                                <i class="fa-solid fa-user-plus text-xs"></i>
+                            </span>
+                            <input type="text" id="memberNameInput" required placeholder="輸入成員姓名..." maxlength="10"
+                                class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm transition-all" />
+                        </div>
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition-all shadow flex items-center gap-1 shrink-0 active:scale-95">
+                            <i class="fa-solid fa-plus"></i> 新增
+                        </button>
+                    </form>
+
+                    <!-- 成員渲染容器 -->
+                    <div id="membersContainer" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+                        <!-- 動態渲染成員標籤 -->
+                        <div class="text-slate-400 text-sm py-4 text-center w-full italic">尚未加入任何成員...</div>
+                    </div>
+                </div>
+
+                <!-- 2. 新增支出明細區塊 -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 transition-all hover:shadow-md">
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
+                        <i class="fa-solid fa-circle-plus text-emerald-500"></i>
+                        記錄新支出
+                    </h2>
+
+                    <form id="addExpenseForm" class="space-y-4">
+                        <!-- 支出名稱 -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">支出名稱/項目 *</label>
+                            <input type="text" id="expenseTitleInput" required placeholder="例如：晚餐、計程車、民宿住宿" maxlength="20"
+                                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm transition-all" />
+                        </div>
+
+                        <!-- 支出金額 & 付款人 -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">消費金額 (NTD) *</label>
+                                <input type="number" id="expenseAmountInput" required min="1" step="any" placeholder="0"
+                                    class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm transition-all" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 font-medium">誰付的錢？ *</label>
+                                <select id="expensePayerSelect" required
+                                    class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm transition-all appearance-none cursor-pointer">
+                                    <option value="" disabled selected>請選擇...</option>
+                                    <!-- 動態生成付款人選項 -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 分攤成員選擇 -->
+                        <div>
+                            <div class="flex justify-between items-center mb-1.5">
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">分攤參與者 (預設全員) *</label>
+                                <div class="space-x-2">
+                                    <button type="button" onclick="toggleAllParticipants(true)" class="text-xs text-indigo-600 hover:underline">全選</button>
+                                    <button type="button" onclick="toggleAllParticipants(false)" class="text-xs text-slate-400 hover:underline">清空</button>
+                                </div>
+                            </div>
+                            <!-- 複選框容器 -->
+                            <div id="participantsContainer" class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 max-h-36 overflow-y-auto">
+                                <div class="col-span-full text-slate-400 text-xs text-center py-2 italic">請先新增成員...</div>
+                            </div>
+                        </div>
+
+                        <!-- 提交按鈕 -->
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 active:scale-95">
+                            <i class="fa-solid fa-check"></i> 新增此筆支出
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 右側展示與計算結果 (佔 7 格) -->
+            <div class="lg:col-span-7 space-y-6">
+                
+                <!-- 3. 支出明細列表 -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 transition-all hover:shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-receipt text-indigo-500"></i>
+                            支出明細 (<span id="expenseCount">0</span> 筆)
+                        </h2>
+                        <div class="text-sm font-bold text-indigo-600">
+                            總花費：$<span id="totalSpendAmount">0</span>
+                        </div>
+                    </div>
+
+                    <!-- 支出項目容器 -->
+                    <div class="overflow-x-auto">
+                        <div id="expensesTableContainer" class="max-h-80 overflow-y-auto pr-1">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                        <th class="py-2.5 px-3">消費項目</th>
+                                        <th class="py-2.5 px-3">金額</th>
+                                        <th class="py-2.5 px-3">付款人</th>
+                                        <th class="py-2.5 px-3">分攤成員</th>
+                                        <th class="py-2.5 px-3 text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="expensesTableBody">
+                                    <!-- 動態渲染支出列表 -->
+                                    <tr>
+                                        <td colspan="5" class="py-12 text-center text-slate-400 italic text-sm">
+                                            尚未記錄任何支出明細，請在左側填寫。
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 結算結果 (最重要的核心) -->
+                <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl shadow-lg p-6">
+                    <div class="flex justify-between items-center mb-6 border-b border-indigo-500/20 pb-4">
+                        <h2 class="text-lg font-bold flex items-center gap-2">
+                            <i class="fa-solid fa-calculator text-amber-400"></i>
+                            最終分帳方案
+                        </h2>
+                        <button id="copyDebtsTextBtn" class="bg-indigo-600/60 hover:bg-indigo-600 border border-indigo-400/30 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all active:scale-95">
+                            <i class="fa-solid fa-copy"></i> 複製結帳文字
+                        </button>
+                    </div>
+
+                    <!-- 兩欄式呈現：左「成員損益平衡表」｜ 右「清算與轉帳建議」 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        <!-- 左：個人損益表 -->
+                        <div class="space-y-3">
+                            <h3 class="text-xs font-bold text-indigo-300 uppercase tracking-wider mb-2">成員收支明細</h3>
+                            <div id="memberBalancesContainer" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                <!-- 動態渲染個人餘額 -->
+                                <div class="text-sm text-slate-400 italic">無數據</div>
+                            </div>
+                        </div>
+
+                        <!-- 右：結算建議 -->
+                        <div class="space-y-3">
+                            <h3 class="text-xs font-bold text-indigo-300 uppercase tracking-wider mb-2">
+                                轉帳指引 (已將交易次數最小化)
+                            </h3>
+                            <div id="settlementSuggestionsContainer" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                <!-- 動態渲染轉帳建議 -->
+                                <div class="text-sm text-slate-400 italic">無數據</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- 底部資訊與鳴謝 -->
+    <footer class="bg-slate-900 text-slate-400 text-center py-6 border-t border-slate-800 text-xs mt-12">
+        <p class="mb-1">© 2026 多人分帳即時計算器. 保留所有權利。</p>
+        <p class="text-slate-500">採用 Firebase Firestore 提供雲端高鐵級即時同步技術。</p>
+    </footer>
+
+    <!-- 彈窗對話框 1：切換/建立 帳本房號 -->
+    <div id="roomModal" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 transform transition-all scale-95 opacity-0 duration-300" id="roomModalContent">
+            <div class="text-center mb-6">
+                <div class="inline-flex bg-indigo-50 text-indigo-600 p-3 rounded-full mb-3">
+                    <i class="fa-solid fa-hotel text-2xl"></i>
+                </div>
+                <h3 class="text-xl font-bold text-slate-900">選擇您的分帳房號</h3>
+                <p class="text-sm text-slate-500 mt-1">進入專屬房間，所有成員可在各自手機上實時同步！</p>
+            </div>
+
+            <div class="space-y-4">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-500 mb-1.5">項目名稱</label>
-                  <input
-                    type="text"
-                    placeholder="例：計程車、晚餐"
-                    v-model="expTitle"
-                    class="w-full bg-slate-50 border border-slate-200 text-sm placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition"
-                  />
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">請輸入自訂房號（英文字母或數字）</label>
+                    <input type="text" id="modalRoomIdInput" placeholder="例如：trip2026、dinner-party" maxlength="30"
+                        class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white font-mono font-semibold text-center tracking-wider text-lg" />
                 </div>
-                <div>
-                  <label class="block text-xs font-semibold text-slate-500 mb-1.5">金額</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="0.00"
-                    v-model="expAmount"
-                    class="w-full bg-slate-50 border border-slate-200 text-sm placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition font-semibold"
-                  />
-                </div>
-              </div>
 
-              <div>
-                <label class="block text-xs font-semibold text-slate-500 mb-1.5">是誰代付的？</label>
-                <div class="relative">
-                  <select
-                    v-model="expPayer"
-                    class="w-full bg-slate-50 border border-slate-200 text-sm text-slate-800 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100 rounded-xl px-3 py-2 outline-none transition appearance-none"
-                  >
-                    <option v-for="m in roomData.members" :key="m" :value="m">{{ m }}</option>
-                  </select>
-                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 參與分攤人選取框 -->
-              <div>
-                <div class="flex items-center justify-between mb-1.5">
-                  <label class="block text-xs font-semibold text-slate-500">
-                    哪些人需要分攤？ 
-                    <span class="text-emerald-600 ml-1">({{ expParticipants.length }} 人分攤)</span>
-                  </label>
-                  <div class="flex space-x-2 text-xs">
-                    <button
-                      type="button"
-                      @click="handleSelectAllParticipants"
-                      class="text-emerald-600 hover:text-emerald-700 font-bold"
-                    >
-                      全選
+                <div class="flex gap-2">
+                    <button id="modalJoinBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow active:scale-95">
+                        進入該房間
                     </button>
-                    <span class="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      @click="handleClearParticipants"
-                      class="text-slate-500 hover:text-slate-600"
-                    >
-                      清空
+                    <button id="modalRandomBtn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-4 rounded-xl transition-all flex items-center gap-1 active:scale-95" title="隨機產生">
+                        <i class="fa-solid fa-dice"></i> 隨機生成
                     </button>
-                  </div>
                 </div>
-
-                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-36 overflow-y-auto space-y-2 custom-scrollbar">
-                  <label
-                    v-for="member in roomData.members"
-                    :key="member"
-                    class="flex items-center space-x-3 cursor-pointer select-none text-sm font-medium"
-                  >
-                    <input
-                      type="checkbox"
-                      :value="member"
-                      v-model="expParticipants"
-                      class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
-                    />
-                    <span :class="expParticipants.includes(member) ? 'text-slate-800' : 'text-slate-400 line-through'">
-                      {{ member }}
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                class="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-xl transition duration-200 shadow-sm flex items-center justify-center space-x-2 text-sm"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-                <span>送出此筆支出</span>
-              </button>
-            </form>
-          </div>
-
-          <!-- 支出記錄列表 -->
-          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
-              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
-              </svg>
-              <span>支出明細</span>
-              <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">
-                {{ roomData.expenses.length }} 筆
-              </span>
-            </h3>
-
-            <div v-if="roomData.expenses.length === 0" class="text-center py-10 text-slate-400 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
-              尚未建立任何款項支出
             </div>
-            <div v-else class="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-              <div
-                v-for="exp in roomData.expenses"
-                :key="exp.id"
-                class="p-3.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-slate-200 transition relative group"
-              >
-                <div class="flex justify-between items-start mb-1">
-                  <div>
-                    <h4 class="font-bold text-sm text-slate-800">{{ exp.title }}</h4>
-                    <p class="text-[10px] text-slate-400 font-mono mt-0.5">{{ exp.date }}</p>
-                  </div>
-                  <div class="flex items-center space-x-2">
-                    <span class="font-bold text-sm text-emerald-700">
-                      ${{ Number(exp.amount).toFixed(2) }}
-                    </span>
-                    <button
-                      @click="handleDeleteExpense(exp.id)"
-                      title="刪除此支出"
-                      class="text-slate-400 hover:text-rose-600 p-1 lg:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="mt-2 pt-2 border-t border-slate-200/60 flex flex-wrap items-center justify-between gap-1.5 text-xs text-slate-500">
-                  <div>
-                    <span>付款人：</span>
-                    <span class="font-semibold text-slate-700">{{ exp.payer }}</span>
-                  </div>
-                  <div class="max-w-[70%] text-right overflow-hidden text-ellipsis whitespace-nowrap" :title="exp.participants.join(', ')">
-                    <span>分攤者：</span>
-                    <span class="font-semibold text-slate-600 bg-slate-200/50 px-1.5 py-0.5 rounded text-[10px]">
-                      {{ exp.participants.length === roomData.members.length ? '全部人' : exp.participants.join(', ') }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ==========================================
-            右欄 (4 cols): 結算統計 & 最優還款方案
-            ========================================== -->
-        <section class="lg:col-span-4 space-y-6">
-          
-          <!-- 個人收支統計 -->
-          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2">
-              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path>
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path>
-              </svg>
-              <span>收支結算</span>
-            </h3>
-
-            <div v-if="roomData.members.length === 0" class="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-              暫無數據
-            </div>
-            <div v-else class="space-y-3">
-              <div
-                v-for="member in roomData.members"
-                :key="member"
-                class="p-3 rounded-xl border border-slate-100 bg-slate-50 flex flex-col space-y-1.5"
-              >
-                <div class="flex items-center justify-between">
-                  <span class="font-bold text-sm text-slate-800">{{ member }}</span>
-                  
-                  <!-- 狀態標籤 -->
-                  <span v-if="memberSummaries[member] && memberSummaries[member].net > 0.01" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                    應收回 ${{ Math.abs(memberSummaries[member].net).toFixed(2) }}
-                  </span>
-                  <span v-else-if="memberSummaries[member] && memberSummaries[member].net < -0.01" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
-                    應支付 ${{ Math.abs(memberSummaries[member].net).toFixed(2) }}
-                  </span>
-                  <span v-else class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
-                    已結清
-                  </span>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2 text-xs text-slate-500 pt-1.5 border-t border-slate-200/60">
-                  <div>
-                    <span>代付總額：</span>
-                    <span class="font-semibold text-slate-700">${{ (memberSummaries[member]?.paid || 0).toFixed(2) }}</span>
-                  </div>
-                  <div class="text-right">
-                    <span>應攤總額：</span>
-                    <span class="font-semibold text-slate-700">${{ (memberSummaries[member]?.shouldPay || 0).toFixed(2) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 最佳還款方案 -->
-          <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm relative overflow-hidden">
-            <div class="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full -mr-6 -mt-6"></div>
-            
-            <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center space-x-2 relative z-10">
-              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span>最佳還款路徑</span>
-            </h3>
-
-            <div v-if="roomData.expenses.length === 0" class="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200 relative z-10">
-              暫無分帳結算需求
-            </div>
-            
-            <div v-else-if="transactions.length === 0" class="text-center py-6 text-sm text-emerald-600 bg-emerald-50 rounded-xl border border-emerald-100 font-medium relative z-10 flex flex-col items-center justify-center space-y-1">
-              <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span>收支極為平衡，無須進行結算！</span>
-            </div>
-
-            <div v-else class="space-y-3 relative z-10">
-              <div
-                v-for="(t, idx) in transactions"
-                :key="idx"
-                class="flex items-center justify-between p-3 rounded-xl bg-emerald-50/50 border border-emerald-100/80"
-              >
-                <div class="flex items-center space-x-2">
-                  <span class="font-bold text-sm text-slate-800">{{ t.from }}</span>
-                  <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3"></path>
-                  </svg>
-                  <span class="font-bold text-sm text-slate-800">{{ t.to }}</span>
-                </div>
-                <div class="text-right">
-                  <span class="text-xs text-slate-400 block">支付</span>
-                  <span class="font-black text-emerald-700 text-sm">
-                    ${{ t.amount.toFixed(2) }}
-                  </span>
-                </div>
-              </div>
-
-              <p class="text-[10px] text-slate-400 text-center mt-3">
-                💡 本系統演算法已自動優化轉帳路徑，為您縮減了不必要的重疊交易。
-              </p>
-            </div>
-          </div>
-        </section>
-
-      </main>
-
-      <!-- 頁尾 -->
-      <footer class="mt-auto py-6 text-center text-xs text-slate-400 border-t border-slate-100 bg-white">
-        <p>© 2026 多人即時同步分帳計算器. 數據已受安全的雲端保護與即時同步.</p>
-      </footer>
+        </div>
     </div>
 
-  </div>
+    <!-- 自訂輕量化 Toast 系統 (不用原生 alert) -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
 
-  <script type="module">
-    // 直接從 URL 導入，移除對 importmap 的依賴，大幅增強瀏覽器相容性
-    import { createApp, ref, reactive, computed, watch, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <!-- Firebase SDK 引入 (使用 11.6.1 版本) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // --- Firebase 初始化保護機制 ---
-    let app, auth, db;
-    let demoMode = false;
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'split-bill-app';
+        // --- 1. 初始化環境變數與 Firebase ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'multi-split-bill-app';
+        
+        // 安全處理 Firebase 配置 (提供安全模擬，若環境變數不可用則切換至 LocalStorage 模式)
+        let useLocalStorageFallback = false;
+        let db = null;
+        let auth = null;
 
-    try {
-      if (typeof __firebase_config === 'undefined' || !__firebase_config) {
-        throw new Error("無效的雲端設定變數 __firebase_config");
-      }
-      const firebaseConfig = JSON.parse(__firebase_config);
-      if (!firebaseConfig.apiKey) {
-        throw new Error("Firebase 設定檔中缺少 apiKey");
-      }
-      app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
-      db = getFirestore(app);
-    } catch (err) {
-      console.warn("⚠️ Firebase 連線啟用失敗，改用「本機演示模式」進行渲染：", err.message);
-      demoMode = true;
-    }
-
-    // 建立 Vue 應用程式
-    createApp({
-      setup() {
-        // --- 狀態定義 ---
-        const user = ref(null);
-        const roomId = ref('');
-        const roomData = ref(null);
-        const loading = ref(true);
-        const syncing = ref(false);
-
-        // 輸入控制狀態
-        const inputRoomId = ref('');
-        const newMemberName = ref('');
-
-        // 支出表單狀態
-        const expTitle = ref('');
-        const expAmount = ref('');
-        const expPayer = ref('');
-        const expParticipants = ref([]);
-
-        // Toast 訊息狀態
-        const toast = reactive({ show: false, message: '', type: 'info' });
-
-        // 輔助函數：顯示通知
-        let toastTimeout = null;
-        const showToast = (message, type = 'info') => {
-          if (toastTimeout) clearTimeout(toastTimeout);
-          toast.show = true;
-          toast.message = message;
-          toast.type = type;
-          toastTimeout = setTimeout(() => {
-            toast.show = false;
-          }, 4000);
-        };
-
-        // --- 1. Firebase 登入流程 (在 Demo 模式下直接略過) ---
-        onMounted(async () => {
-          if (demoMode) {
-            user.value = { uid: 'demo-user-id' };
-            loading.value = false;
-          } else {
-            try {
-              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-              } else {
-                await signInAnonymously(auth);
-              }
-            } catch (err) {
-              console.error('Firebase Auth Error:', err);
-              showToast('與伺服器連線驗證失敗，切換為本地預覽', 'error');
-            }
-
-            onAuthStateChanged(auth, (currentUser) => {
-              user.value = currentUser;
-              loading.value = false;
-            });
-          }
-
-          // 監聽網址 Hash 變化，自動進入群組
-          const handleHashChange = () => {
-            const hash = window.location.hash;
-            if (hash && hash.startsWith('#room-')) {
-              const idFromHash = hash.replace('#room-', '').trim();
-              if (idFromHash) {
-                roomId.value = idFromHash;
-              }
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
             } else {
-              roomId.value = '';
-              roomData.value = null;
+                console.warn("未檢測到 Firebase 配置，切換至 LocalStorage 獨立存儲模式。");
+                useLocalStorageFallback = true;
             }
-          };
+        } catch (e) {
+            console.error("Firebase 初始化失敗:", e);
+            useLocalStorageFallback = true;
+        }
 
-          handleHashChange();
-          window.addEventListener('hashchange', handleHashChange);
+        // --- 2. 帳務核心狀態定義 ---
+        let currentRoomId = '';
+        let ledgerState = {
+            members: [],  // [{ id: string, name: string }]
+            expenses: []  // [{ id: string, title: string, amount: number, payerId: string, participantIds: [string], createdAt: number }]
+        };
+        let isAuthReady = false;
+        let unsubscribeRoomListener = null;
+
+        // --- 3. 初始化載入流程 ---
+        window.addEventListener('load', async () => {
+            // 從 URL Hash 分析是否有指定房號
+            let initialRoom = window.location.hash.substring(1).trim();
+            
+            if (useLocalStorageFallback) {
+                updateSyncStatus("本地離線儲存模式開啟", "green");
+                if (!initialRoom) {
+                    initialRoom = generateRandomId(6);
+                    window.location.hash = initialRoom;
+                }
+                currentRoomId = initialRoom;
+                document.getElementById('roomIdDisplay').innerText = currentRoomId;
+                loadFromLocalStorage();
+                renderAll();
+            } else {
+                // Firebase 線上模式
+                updateSyncStatus("正在啟動安全驗證...", "amber");
+                try {
+                    await initAuth();
+                } catch (err) {
+                    showToast("驗證失敗，切換至離線模式: " + err.message, "error");
+                    useLocalStorageFallback = true;
+                    if (!initialRoom) initialRoom = generateRandomId(6);
+                    currentRoomId = initialRoom;
+                    window.location.hash = currentRoomId;
+                    document.getElementById('roomIdDisplay').innerText = currentRoomId;
+                    loadFromLocalStorage();
+                    renderAll();
+                    return;
+                }
+
+                if (!initialRoom) {
+                    // 若無房號，彈出視窗讓用戶自訂或生成
+                    openRoomModal();
+                } else {
+                    currentRoomId = initialRoom;
+                    document.getElementById('roomIdDisplay').innerText = currentRoomId;
+                    startSyncing(currentRoomId);
+                }
+            }
         });
 
-        // --- 2. 數據讀取與監聽 (支援本機 Demo 與 雲端即時同步) ---
-        let unsubscribeListener = null;
-        watch([user, roomId], ([newUser, newRoomId]) => {
-          if (unsubscribeListener) {
-            unsubscribeListener();
-            unsubscribeListener = null;
-          }
+        // 匿名登入 (遵循 RULE 3 優先順序)
+        async function initAuth() {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+            return new Promise((resolve) => {
+                const unsub = onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        isAuthReady = true;
+                        resolve(user);
+                        unsub();
+                    }
+                });
+            });
+        }
 
-          if (!newUser || !newRoomId) return;
+        // --- 4. 房號生成與彈出視窗邏輯 ---
+        function generateRandomId(length = 6) {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
 
-          syncing.value = true;
-
-          if (demoMode) {
-            // 本機演示模式：給予初始測試數據，無須雲端連線
+        function openRoomModal() {
+            const modal = document.getElementById('roomModal');
+            const content = document.getElementById('roomModalContent');
+            modal.classList.remove('hidden');
             setTimeout(() => {
-              roomData.value = {
-                roomId: newRoomId,
-                members: ['小明', '阿花', '大強'],
-                expenses: [
-                  {
-                    id: 'exp-demo-1',
-                    title: '美味麻辣火鍋',
-                    amount: 1500,
-                    payer: '小明',
-                    participants: ['小明', '阿花', '大強'],
-                    date: new Date().toLocaleString('zh-TW', { hour12: false })
-                  },
-                  {
-                    id: 'exp-demo-2',
-                    title: '回程計程車共乘',
-                    amount: 300,
-                    payer: '阿花',
-                    participants: ['阿花', '大強'],
-                    date: new Date().toLocaleString('zh-TW', { hour12: false })
-                  }
-                ],
-                createdAt: new Date().toISOString()
-              };
-              syncing.value = false;
-              showToast('已進入「本機模擬群組」！可以自由增刪測試功能！', 'success');
-            }, 200);
-            return;
-          }
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 50);
 
-          // 正常雲端同步模式 (符合 RULE 1, 2, 3)
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', newRoomId);
+            // 預設隨機房號
+            document.getElementById('modalRoomIdInput').value = generateRandomId(6);
+        }
 
-          unsubscribeListener = onSnapshot(
-            docRef,
-            (docSnap) => {
-              if (docSnap.exists()) {
-                roomData.value = docSnap.data();
-              } else {
-                const initialData = {
-                  roomId: newRoomId,
-                  members: [],
-                  expenses: [],
-                  createdAt: new Date().toISOString()
-                };
-                setDoc(docRef, initialData)
-                  .then(() => {
-                    roomData.value = initialData;
-                    showToast('成功建立全新同步分帳群組！', 'success');
-                  })
-                  .catch((err) => {
-                    console.error('Create room error:', err);
-                    showToast('初始化群組失敗，請重試', 'error');
-                  });
-              }
-              syncing.value = false;
-            },
-            (error) => {
-              console.error('Firestore listener error:', error);
-              showToast('即時同步連線中斷，請重整網頁', 'error');
-              syncing.value = false;
-            }
-          );
+        function closeRoomModal() {
+            const modal = document.getElementById('roomModal');
+            const content = document.getElementById('roomModalContent');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
+        // 監聽房號彈窗的操作
+        document.getElementById('modalRandomBtn').addEventListener('click', () => {
+            document.getElementById('modalRoomIdInput').value = generateRandomId(6);
         });
 
-        // --- 3. 當成員列表更新時，自動預設支出的付款人及分攤人 ---
-        watch(() => roomData.value?.members, (newMembers) => {
-          if (newMembers && newMembers.length > 0) {
-            if (!expPayer.value || !newMembers.includes(expPayer.value)) {
-              expPayer.value = newMembers[0];
+        document.getElementById('modalJoinBtn').addEventListener('click', () => {
+            const rawInput = document.getElementById('modalRoomIdInput').value.trim();
+            // 只允許英數字與連字元
+            const cleaned = rawInput.replace(/[^a-zA-Z0-9-_]/g, '');
+            if (!cleaned) {
+                showToast("房號格式不正確，僅限英數字與連字符", "warning");
+                return;
             }
-            if (expParticipants.value.length === 0) {
-              expParticipants.value = [...newMembers];
+            closeRoomModal();
+            currentRoomId = cleaned;
+            window.location.hash = currentRoomId;
+            document.getElementById('roomIdDisplay').innerText = currentRoomId;
+
+            if (useLocalStorageFallback) {
+                loadFromLocalStorage();
+                renderAll();
+            } else {
+                startSyncing(currentRoomId);
             }
-          } else {
-            expPayer.value = '';
-            expParticipants.value = [];
-          }
-        }, { deep: true });
+        });
 
-        // --- 4. 生成隨集群組代碼並創建 ---
-        const handleCreateRoom = () => {
-          const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-          window.location.hash = `room-${randomId}`;
-        };
+        document.getElementById('changeRoomBtn').addEventListener('click', () => {
+            openRoomModal();
+        });
 
-        // --- 5. 加入既有群組 ---
-        const handleJoinRoom = () => {
-          if (!inputRoomId.value.trim()) {
-            showToast('請輸入群組代碼', 'error');
-            return;
-          }
-          const formattedId = inputRoomId.value.trim().toUpperCase();
-          window.location.hash = `room-${formattedId}`;
-        };
+        // 複製連結邏輯 (使用 document.execCommand 作為 iframe 環境中的安全兼容方案)
+        document.getElementById('copyRoomBtn').addEventListener('click', () => {
+            const url = window.location.href;
+            const tempInput = document.createElement('input');
+            tempInput.value = url;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast("帳本分享連結已成功複製到剪貼簿！", "success");
+                } else {
+                    showToast("複製失敗，請手動複製網址", "warning");
+                }
+            } catch (err) {
+                showToast("複製失敗，請手動複製網址", "warning");
+            }
+            document.body.removeChild(tempInput);
+        });
 
-        // --- 6. 退出當前群組 ---
-        const handleExitRoom = () => {
-          window.location.hash = '';
-          roomId.value = '';
-          roomData.value = null;
-          inputRoomId.value = '';
-        };
+        // --- 5. Firebase 即時數據流同步 (遵循 RULE 1 & 2) ---
+        function startSyncing(roomId) {
+            if (unsubscribeRoomListener) {
+                unsubscribeRoomListener();
+            }
 
-        // --- 7. 新增成員 ---
-        const handleAddMember = () => {
-          if (!newMemberName.value.trim()) {
-            showToast('請輸入成員姓名', 'error');
-            return;
-          }
-          const name = newMemberName.value.trim();
-          if (roomData.value.members.includes(name)) {
-            showToast('該成員姓名已存在', 'error');
-            return;
-          }
+            updateSyncStatus("正在同步雲端資料...", "amber");
 
-          const updatedMembers = [...roomData.value.members, name];
-          expParticipants.value.push(name);
+            // 嚴格依循 RULE 1 路徑：/artifacts/{appId}/public/data/ledgers/{roomId}
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ledgers', roomId);
 
-          if (demoMode) {
-            roomData.value.members = updatedMembers;
-            newMemberName.value = '';
-            showToast(`已成功加入成員：${name}`, 'success');
-            return;
-          }
-
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
-          updateDoc(docRef, { members: updatedMembers })
-            .then(() => {
-              newMemberName.value = '';
-              showToast(`已成功加入成員：${name}`, 'success');
-            })
-            .catch((err) => {
-              console.error(err);
-              showToast('新增成員失敗', 'error');
+            // 建立監聽 (具有錯誤回調，預防靜默失敗)
+            unsubscribeRoomListener = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    ledgerState.members = data.members || [];
+                    ledgerState.expenses = data.expenses || [];
+                } else {
+                    // 若無歷史記錄，初始化為空白帳本並存入雲端
+                    ledgerState.members = [];
+                    ledgerState.expenses = [];
+                    setDoc(docRef, { members: [], expenses: [], updatedAt: Date.now() });
+                }
+                updateSyncStatus("已與雲端同步", "green");
+                renderAll();
+            }, (error) => {
+                console.error("Firestore 同步錯誤:", error);
+                updateSyncStatus("同步暫時中斷，嘗試自動修復", "rose");
+                showToast("數據監聽失敗，切換至本地離線快照", "warning");
             });
-        };
+        }
 
-        // --- 8. 刪除成員 ---
-        const handleDeleteMember = (memberName) => {
-          const isPayer = roomData.value.expenses.some(exp => exp.payer === memberName);
-          const isParticipant = roomData.value.expenses.some(exp => exp.participants && exp.participants.includes(memberName));
+        // 雲端數據更新
+        async function pushStateToCloud() {
+            if (useLocalStorageFallback) {
+                saveToLocalStorage();
+                return;
+            }
 
-          if (isPayer || isParticipant) {
-            showToast(`無法刪除「${memberName}」，因為其已有相關的帳目記錄。請先刪除包含該成員的支出。`, 'error');
-            return;
-          }
+            if (!auth.currentUser) {
+                showToast("未完成驗證，無法提交資料", "error");
+                return;
+            }
 
-          const updatedMembers = roomData.value.members.filter(m => m !== memberName);
-          expParticipants.value = expParticipants.value.filter(p => p !== memberName);
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ledgers', currentRoomId);
+                // 串行化深層結構防止型態錯誤
+                await setDoc(docRef, {
+                    members: ledgerState.members,
+                    expenses: ledgerState.expenses,
+                    updatedAt: Date.now()
+                }, { merge: true });
+            } catch (err) {
+                console.error("上傳雲端失敗:", err);
+                showToast("網路異常，儲存失敗", "error");
+            }
+        }
 
-          if (demoMode) {
-            roomData.value.members = updatedMembers;
-            showToast(`已刪除成員：${memberName}`, 'success');
-            return;
-          }
+        // LocalStorage 備用方案
+        function saveToLocalStorage() {
+            localStorage.setItem(`ledger_${currentRoomId}`, JSON.stringify(ledgerState));
+        }
 
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
-          updateDoc(docRef, { members: updatedMembers })
-            .then(() => {
-              showToast(`已刪除成員：${memberName}`, 'success');
-            })
-            .catch((err) => {
-              console.error(err);
-              showToast('刪除成員失敗', 'error');
+        function loadFromLocalStorage() {
+            const localData = localStorage.getItem(`ledger_${currentRoomId}`);
+            if (localData) {
+                try {
+                    ledgerState = JSON.parse(localData);
+                } catch (e) {
+                    ledgerState = { members: [], expenses: [] };
+                }
+            } else {
+                ledgerState = { members: [], expenses: [] };
+            }
+        }
+
+        // --- 6. 介面動態渲染邏輯 ---
+        function renderAll() {
+            renderMembers();
+            renderPayerSelect();
+            renderParticipants();
+            renderExpenses();
+            calculateDebts();
+        }
+
+        // 6.1 渲染成員名單
+        function renderMembers() {
+            const container = document.getElementById('membersContainer');
+            const countDisplay = document.getElementById('memberCount');
+            countDisplay.innerText = ledgerState.members.length;
+
+            if (ledgerState.members.length === 0) {
+                container.innerHTML = `<div class="text-slate-400 text-xs py-4 text-center w-full italic">尚未加入任何成員...</div>`;
+                return;
+            }
+
+            container.innerHTML = '';
+            ledgerState.members.forEach(member => {
+                const badge = document.createElement('div');
+                badge.className = "inline-flex items-center bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-700 hover:text-rose-700 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all group cursor-pointer";
+                badge.innerHTML = `
+                    <span>${escapeHtml(member.name)}</span>
+                    <button type="button" class="ml-2 text-slate-400 hover:text-rose-600 transition-colors group-hover:scale-110" title="刪除此成員">
+                        <i class="fa-solid fa-xmark text-[10px]"></i>
+                    </button>
+                `;
+                
+                // 點選刪除成員
+                badge.querySelector('button').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteMember(member.id, member.name);
+                });
+                container.appendChild(badge);
             });
-        };
+        }
 
-        // --- 9. 新增支出項目 ---
-        const handleAddExpense = () => {
-          if (!expTitle.value.trim()) {
-            showToast('請輸入支出項目名稱', 'error');
-            return;
-          }
-          const amount = parseFloat(expAmount.value);
-          if (isNaN(amount) || amount <= 0) {
-            showToast('請輸入有效的支出金額（大於 0）', 'error');
-            return;
-          }
-          if (!expPayer.value) {
-            showToast('請選擇付款人', 'error');
-            return;
-          }
-          if (expParticipants.value.length === 0) {
-            showToast('請至少勾選一位分攤成員', 'error');
-            return;
-          }
+        // 6.2 渲染付款人下拉選單
+        function renderPayerSelect() {
+            const select = document.getElementById('expensePayerSelect');
+            const previousSelectedValue = select.value;
+            
+            select.innerHTML = '<option value="" disabled>請選擇...</option>';
+            
+            if (ledgerState.members.length === 0) {
+                select.innerHTML += '<option value="" disabled>請先在上方新增成員</option>';
+                return;
+            }
 
-          const newExpense = {
-            id: 'exp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
-            title: expTitle.value.trim(),
-            amount: Number(amount.toFixed(2)),
-            payer: expPayer.value,
-            participants: [...expParticipants.value],
-            date: new Date().toLocaleString('zh-TW', { hour12: false })
-          };
-
-          const updatedExpenses = [newExpense, ...roomData.value.expenses];
-
-          if (demoMode) {
-            roomData.value.expenses = updatedExpenses;
-            expTitle.value = '';
-            expAmount.value = '';
-            expParticipants.value = [...roomData.value.members];
-            showToast('成功新增支出項目', 'success');
-            return;
-          }
-
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
-          updateDoc(docRef, { expenses: updatedExpenses })
-            .then(() => {
-              expTitle.value = '';
-              expAmount.value = '';
-              expParticipants.value = [...roomData.value.members];
-              showToast('成功新增支出項目', 'success');
-            })
-            .catch((err) => {
-              console.error(err);
-              showToast('新增支出失敗', 'error');
+            ledgerState.members.forEach(member => {
+                const opt = document.createElement('option');
+                opt.value = member.id;
+                opt.innerText = member.name;
+                select.appendChild(opt);
             });
-        };
 
-        // --- 10. 刪除支出項目 ---
-        const handleDeleteExpense = (expId) => {
-          const updatedExpenses = roomData.value.expenses.filter(exp => exp.id !== expId);
+            // 回復之前選取的選項
+            if (ledgerState.members.some(m => m.id === previousSelectedValue)) {
+                select.value = previousSelectedValue;
+            } else {
+                select.selectedIndex = 0;
+            }
+        }
 
-          if (demoMode) {
-            roomData.value.expenses = updatedExpenses;
-            showToast('已刪除該筆支出', 'success');
-            return;
-          }
+        // 6.3 渲染分攤成員複選框
+        function renderParticipants() {
+            const container = document.getElementById('participantsContainer');
+            
+            if (ledgerState.members.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-slate-400 text-xs text-center py-2 italic">請先在上方新增成員...</div>`;
+                return;
+            }
 
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId.value);
-          updateDoc(docRef, { expenses: updatedExpenses })
-            .then(() => {
-              showToast('已刪除該筆支出', 'success');
-            })
-            .catch((err) => {
-              console.error(err);
-              showToast('刪除支出失敗', 'error');
+            container.innerHTML = '';
+            ledgerState.members.forEach(member => {
+                const label = document.createElement('label');
+                label.className = "flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-100 hover:border-indigo-100 cursor-pointer select-none text-xs transition";
+                label.innerHTML = `
+                    <input type="checkbox" name="expenseParticipant" value="${member.id}" checked
+                        class="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer" />
+                    <span class="text-slate-700 truncate font-medium">${escapeHtml(member.name)}</span>
+                `;
+                container.appendChild(label);
             });
-        };
+        }
 
-        // --- 11. 複製邀請連結 ---
-        const handleCopyInviteLink = () => {
-          const shareUrl = `${window.location.origin}${window.location.pathname}#room-${roomId.value}`;
-          const textarea = document.createElement('textarea');
-          textarea.value = `我們一起用「即時同步分帳計算器」記帳吧！\n請點擊連結直接加入我們的分帳群組：\n${shareUrl}\n\n群組代碼：${roomId.value}`;
-          document.body.appendChild(textarea);
-          textarea.select();
-          try {
-            document.execCommand('copy');
-            showToast('已成功複製群組邀請連結與代碼！快發給朋友吧。', 'success');
-          } catch (err) {
-            showToast('複製失敗，請手動複製網址分享。', 'error');
-          }
-          document.body.removeChild(textarea);
-        };
+        // 工具：快速全選/清空分攤成員
+        window.toggleAllParticipants = function(checkAll) {
+            const checkboxes = document.getElementsByName('expenseParticipant');
+            checkboxes.forEach(cb => {
+                cb.checked = checkAll;
+            });
+        }
 
-        // --- 12. 快速全選/清除分攤人 ---
-        const handleSelectAllParticipants = () => {
-          if (roomData.value) {
-            expParticipants.value = [...roomData.value.members];
-          }
-        };
+        // 6.4 渲染支出明細列表
+        function renderExpenses() {
+            const tbody = document.getElementById('expensesTableBody');
+            const countDisplay = document.getElementById('expenseCount');
+            const totalSpendDisplay = document.getElementById('totalSpendAmount');
 
-        const handleClearParticipants = () => {
-          expParticipants.value = [];
-        };
+            countDisplay.innerText = ledgerState.expenses.length;
+            
+            // 計算總花費
+            const total = ledgerState.expenses.reduce((sum, item) => sum + Number(item.amount), 0);
+            totalSpendDisplay.innerText = formatMoney(total);
 
-        // --- 13. 分攤與結算核心演算法 (拆帳邏輯) ---
-        const billingCalculation = computed(() => {
-          if (!roomData.value || !roomData.value.members || roomData.value.members.length === 0) {
-            return { memberSummaries: {}, transactions: [] };
-          }
+            if (ledgerState.expenses.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="py-12 text-center text-slate-400 italic text-sm">
+                            尚未記錄任何支出明細，請在左側填寫。
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
 
-          const { members, expenses } = roomData.value;
-          
-          // 初始化每位成員的數據統計
-          const summaries = {};
-          members.forEach(member => {
-            summaries[member] = {
-              name: member,
-              paid: 0,       
-              shouldPay: 0,  
-              net: 0         
+            tbody.innerHTML = '';
+            // 依據時間降序排列 (新在最前)
+            const sortedExpenses = [...ledgerState.expenses].sort((a, b) => b.createdAt - a.createdAt);
+
+            sortedExpenses.forEach(item => {
+                const payer = ledgerState.members.find(m => m.id === item.payerId);
+                const payerName = payer ? payer.name : '未知';
+
+                // 計算分攤名單展示
+                const participantNames = item.participantIds
+                    .map(pid => {
+                        const m = ledgerState.members.find(member => member.id === pid);
+                        return m ? m.name : null;
+                    })
+                    .filter(name => name !== null);
+
+                let participantsStr = '無人參與';
+                if (participantNames.length === ledgerState.members.length && ledgerState.members.length > 0) {
+                    participantsStr = '全員平分';
+                } else if (participantNames.length > 0) {
+                    participantsStr = participantNames.join(', ');
+                }
+
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-slate-100 hover:bg-slate-50/50 text-sm";
+                tr.innerHTML = `
+                    <td class="py-3 px-3 font-semibold text-slate-800">${escapeHtml(item.title)}</td>
+                    <td class="py-3 px-3 text-indigo-600 font-bold">$${formatMoney(item.amount)}</td>
+                    <td class="py-3 px-3 text-slate-500">${escapeHtml(payerName)}</td>
+                    <td class="py-3 px-3">
+                        <span class="inline-block max-w-[150px] truncate text-slate-400 text-xs" title="${escapeHtml(participantNames.join(', '))}">
+                            ${escapeHtml(participantsStr)} (${participantNames.length}人)
+                        </span>
+                    </td>
+                    <td class="py-3 px-3 text-center">
+                        <button class="text-rose-400 hover:text-rose-600 p-1 rounded-md transition-colors" title="刪除支出">
+                            <i class="fa-regular fa-trash-can"></i>
+                        </button>
+                    </td>
+                `;
+
+                tr.querySelector('button').addEventListener('click', () => {
+                    deleteExpense(item.id, item.title);
+                });
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        // --- 7. 成員與支出數據操作 (增刪邏輯) ---
+
+        // A. 新增成員
+        document.getElementById('addMemberForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const nameInput = document.getElementById('memberNameInput');
+            const name = nameInput.value.trim();
+
+            if (!name) return;
+
+            // 檢查重複名字
+            const isExist = ledgerState.members.some(m => m.name === name);
+            if (isExist) {
+                showToast(`名稱「${name}」已存在，請使用不同暱稱！`, "warning");
+                return;
+            }
+
+            const newMember = {
+                id: 'member_' + generateRandomId(8),
+                name: name
             };
-          });
 
-          // 走訪所有支出，累加各成員代付與分攤
-          expenses.forEach(exp => {
-            const amount = parseFloat(exp.amount) || 0;
-            const payer = exp.payer;
-            const participants = exp.participants || [];
+            ledgerState.members.push(newMember);
+            nameInput.value = '';
 
-            if (amount <= 0 || participants.length === 0) return;
-
-            // 1. 付款人累加「代付總額」
-            if (summaries[payer]) {
-              summaries[payer].paid += amount;
-            }
-
-            // 2. 所有參與者分攤金額
-            const splitShare = amount / participants.length;
-            participants.forEach(p => {
-              if (summaries[p]) {
-                summaries[p].shouldPay += splitShare;
-              }
-            });
-          });
-
-          // 3. 計算淨值 (Net) = Paid - ShouldPay
-          members.forEach(member => {
-            summaries[member].net = summaries[member].paid - summaries[member].shouldPay;
-          });
-
-          // 4. 還款最佳化演算法（利用雙指標法，最小化交易筆數）
-          const debtors = [];  
-          const creditors = []; 
-
-          members.forEach(member => {
-            const net = summaries[member].net;
-            if (net < -0.01) {
-              debtors.push({ name: member, amount: Math.abs(net) });
-            } else if (net > 0.01) {
-              creditors.push({ name: member, amount: net });
-            }
-          });
-
-          debtors.sort((a, b) => b.amount - a.amount);
-          creditors.sort((a, b) => b.amount - a.amount);
-
-          const transactions = [];
-          let dIdx = 0;
-          let cIdx = 0;
-
-          while (dIdx < debtors.length && cIdx < creditors.length) {
-            const debtor = debtors[dIdx];
-            const creditor = creditors[cIdx];
-
-            const transferAmount = Math.min(debtor.amount, creditor.amount);
-
-            if (transferAmount > 0.01) {
-              transactions.push({
-                from: debtor.name,
-                to: creditor.name,
-                amount: Number(transferAmount.toFixed(2))
-              });
-            }
-
-            debtor.amount -= transferAmount;
-            creditor.amount -= transferAmount;
-
-            if (debtor.amount < 0.01) dIdx++;
-            if (creditor.amount < 0.01) cIdx++;
-          }
-
-          return {
-            memberSummaries: summaries,
-            transactions: transactions
-          };
+            showToast(`已成功加入成員：${name}`, "success");
+            await pushStateToCloud();
+            renderAll();
         });
 
-        const memberSummaries = computed(() => billingCalculation.value.memberSummaries);
-        const transactions = computed(() => billingCalculation.value.transactions);
+        // B. 刪除成員
+        async function deleteMember(memberId, name) {
+            // 檢查該成員是否有未結清之相關交易 (作為付款人或參與人)
+            const isPayer = ledgerState.expenses.some(item => item.payerId === memberId);
+            const isParticipant = ledgerState.expenses.some(item => item.participantIds.includes(memberId));
 
-        return {
-          user,
-          roomId,
-          roomData,
-          loading,
-          syncing,
-          inputRoomId,
-          newMemberName,
-          expTitle,
-          expAmount,
-          expPayer,
-          expParticipants,
-          toast,
-          memberSummaries,
-          transactions,
-          demoMode,
-          handleCreateRoom,
-          handleJoinRoom,
-          handleExitRoom,
-          handleAddMember,
-          handleDeleteMember,
-          handleAddExpense,
-          handleDeleteExpense,
-          handleCopyInviteLink,
-          handleSelectAllParticipants,
-          handleClearParticipants
-        };
-      }
-    }).mount('#app');
-  </script>
+            if (isPayer || isParticipant) {
+                showToast(`無法刪除「${name}」，因為他/她已存在於現有支出交易中。請先刪除該項支出！`, "error");
+                return;
+            }
 
+            // 確認刪除 modal/UI 代替原生 confirm
+            const confirmed = await showConfirmModal(`確認移除成員「${name}」？`);
+            if (!confirmed) return;
+
+            ledgerState.members = ledgerState.members.filter(m => m.id !== memberId);
+            showToast(`已成功移除成員：${name}`, "success");
+            await pushStateToCloud();
+            renderAll();
+        }
+
+        // C. 新增支出
+        document.getElementById('addExpenseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const titleInput = document.getElementById('expenseTitleInput');
+            const amountInput = document.getElementById('expenseAmountInput');
+            const payerSelect = document.getElementById('expensePayerSelect');
+            
+            const title = titleInput.value.trim();
+            const amount = parseFloat(amountInput.value);
+            const payerId = payerSelect.value;
+
+            // 獲取所有打勾的分攤參與者
+            const checkboxes = document.getElementsByName('expenseParticipant');
+            const participantIds = [];
+            checkboxes.forEach(cb => {
+                if (cb.checked) {
+                    participantIds.push(cb.value);
+                }
+            });
+
+            // 防呆驗證
+            if (!title) {
+                showToast("請輸入支出名稱", "warning");
+                return;
+            }
+            if (isNaN(amount) || amount <= 0) {
+                showToast("金額必須大於零", "warning");
+                return;
+            }
+            if (!payerId) {
+                showToast("請選擇實際付錢的成員", "warning");
+                return;
+            }
+            if (participantIds.length === 0) {
+                showToast("必須至少有一位成員參與平分", "warning");
+                return;
+            }
+
+            const newExpense = {
+                id: 'expense_' + generateRandomId(8),
+                title: title,
+                amount: amount,
+                payerId: payerId,
+                participantIds: participantIds,
+                createdAt: Date.now()
+            };
+
+            ledgerState.expenses.push(newExpense);
+
+            // 清空表單
+            titleInput.value = '';
+            amountInput.value = '';
+            payerSelect.selectedIndex = 0;
+            toggleAllParticipants(true); // 重置為全員勾選
+
+            showToast(`已成功新增支出：${title}`, "success");
+            await pushStateToCloud();
+            renderAll();
+        });
+
+        // D. 刪除支出
+        async function deleteExpense(expenseId, title) {
+            const confirmed = await showConfirmModal(`確認刪除支出項目「${title}」？`);
+            if (!confirmed) return;
+
+            ledgerState.expenses = ledgerState.expenses.filter(item => item.id !== expenseId);
+            showToast(`已成功刪除項目：${title}`, "success");
+            await pushStateToCloud();
+            renderAll();
+        }
+
+
+        // --- 8. 核心算法：最優化多人分帳計算器 ---
+        let latestDebtsOutputText = ''; // 存放結帳文字便於複製
+
+        function calculateDebts() {
+            const balancesContainer = document.getElementById('memberBalancesContainer');
+            const suggestionsContainer = document.getElementById('settlementSuggestionsContainer');
+
+            // 如果成員少於 2 人，無法結算
+            if (ledgerState.members.length < 2) {
+                balancesContainer.innerHTML = `<div class="text-xs text-slate-400 italic py-4">成員人數不足 (至少需要2人以上)...</div>`;
+                suggestionsContainer.innerHTML = `<div class="text-xs text-slate-400 italic py-4">請先加入至少兩位成員並填寫交易。</div>`;
+                latestDebtsOutputText = '成員不足，無法計算。';
+                return;
+            }
+
+            // Step 1: 初始化每位成員的淨餘額 (Net Balance)
+            // 餘額 = 幫別人代墊的金額 (正值) - 自己應付的金額 (負值)
+            const balances = {};
+            ledgerState.members.forEach(member => {
+                balances[member.id] = 0;
+            });
+
+            // Step 2: 分類加總每筆消費
+            ledgerState.expenses.forEach(item => {
+                const amount = Number(item.amount);
+                const payerId = item.payerId;
+                const participants = item.participantIds;
+                
+                // 付款者先墊全額，記為正數增加
+                if (balances[payerId] !== undefined) {
+                    balances[payerId] += amount;
+                }
+
+                // 計算每位參與者需要承擔的均分額度
+                const share = amount / participants.length;
+                participants.forEach(pid => {
+                    if (balances[pid] !== undefined) {
+                        balances[pid] -= share;
+                    }
+                });
+            });
+
+            // Step 3: 渲染每位成員的餘額
+            balancesContainer.innerHTML = '';
+            let totalSpent = 0;
+            
+            ledgerState.members.forEach(member => {
+                const net = balances[member.id];
+                const displayNet = formatMoney(net);
+                
+                let textColor = 'text-slate-300';
+                let symbol = '';
+                let note = '';
+                
+                if (net > 0.01) {
+                    textColor = 'text-emerald-400';
+                    symbol = '+';
+                    note = ' (應收回)';
+                } else if (net < -0.01) {
+                    textColor = 'text-rose-400';
+                    symbol = '';
+                    note = ' (應付出)';
+                } else {
+                    note = ' (完美平分)';
+                }
+
+                const itemDiv = document.createElement('div');
+                itemDiv.className = "flex justify-between items-center bg-slate-800/40 px-3 py-2 rounded-xl text-xs";
+                itemDiv.innerHTML = `
+                    <span class="font-medium text-slate-200">${escapeHtml(member.name)}</span>
+                    <span class="${textColor} font-bold">${symbol}${displayNet}${note}</span>
+                `;
+                balancesContainer.appendChild(itemDiv);
+            });
+
+            // Step 4: 清算與最小化交易次數算法 (貪婪匹配 Greedy Match)
+            // 將成員分成「債權人 (Creditors)」與「債務人 (Debtors)」
+            const debtors = [];
+            const creditors = [];
+
+            for (const memberId in balances) {
+                const value = balances[memberId];
+                const name = ledgerState.members.find(m => m.id === memberId).name;
+                
+                if (value < -0.01) {
+                    debtors.push({ id: memberId, name, amount: Math.abs(value) });
+                } else if (value > 0.01) {
+                    creditors.push({ id: memberId, name, amount: value });
+                }
+            }
+
+            // 排序，從最大金額開始匹配
+            debtors.sort((a, b) => b.amount - a.amount);
+            creditors.sort((a, b) => b.amount - a.amount);
+
+            const transactions = [];
+
+            let dIdx = 0;
+            let cIdx = 0;
+
+            while (dIdx < debtors.length && cIdx < creditors.length) {
+                const debtor = debtors[dIdx];
+                const creditor = creditors[cIdx];
+
+                // 決定本次交易金額為兩者最小
+                const transferAmount = Math.min(debtor.amount, creditor.amount);
+
+                if (transferAmount > 0.01) {
+                    transactions.push({
+                        from: debtor.name,
+                        to: creditor.name,
+                        amount: transferAmount
+                    });
+                }
+
+                debtor.amount -= transferAmount;
+                creditor.amount -= transferAmount;
+
+                if (debtor.amount <= 0.01) dIdx++;
+                if (creditor.amount <= 0.01) cIdx++;
+            }
+
+            // Step 5: 渲染轉帳指引
+            suggestionsContainer.innerHTML = '';
+            
+            if (transactions.length === 0) {
+                suggestionsContainer.innerHTML = `<div class="text-xs text-slate-400 italic py-4">完全無欠款。大家均分得非常完美！</div>`;
+                latestDebtsOutputText = '✨ 多人分帳結算結果：完全無欠款，大家都平分囉！';
+                return;
+            }
+
+            let shareTextBuilder = `💰【多人分帳即時結算】\n帳本ID：${currentRoomId}\n`;
+            const total = ledgerState.expenses.reduce((sum, item) => sum + Number(item.amount), 0);
+            shareTextBuilder += `總花費總計：$${formatMoney(total)}\n`;
+            shareTextBuilder += `--------------------------\n`;
+
+            transactions.forEach(tx => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = "bg-indigo-900/30 border border-indigo-500/20 px-3.5 py-3 rounded-xl flex items-center justify-between text-xs";
+                
+                itemDiv.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="bg-rose-500 text-white font-bold px-1.5 py-0.5 rounded text-[10px]">付</span>
+                        <span class="font-bold text-slate-100">${escapeHtml(tx.from)}</span>
+                    </div>
+                    <div class="flex flex-col items-center flex-grow px-2">
+                        <span class="text-[10px] text-slate-400 font-bold tracking-wider">轉帳給 👉</span>
+                        <span class="text-amber-400 font-black font-mono">$${formatMoney(tx.amount)}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-slate-100">${escapeHtml(tx.to)}</span>
+                        <span class="bg-emerald-500 text-white font-bold px-1.5 py-0.5 rounded text-[10px]">收</span>
+                    </div>
+                `;
+                suggestionsContainer.appendChild(itemDiv);
+
+                shareTextBuilder += `🔹 ${tx.from} ➡️ 轉帳 $${formatMoney(tx.amount)} 給 ${tx.to}\n`;
+            });
+
+            shareTextBuilder += `--------------------------\n💡 數據同步時間：${new Date().toLocaleString()}`;
+            latestDebtsOutputText = shareTextBuilder;
+        }
+
+        // 複製結算明細
+        document.getElementById('copyDebtsTextBtn').addEventListener('click', () => {
+            if (!latestDebtsOutputText) {
+                showToast("無結算資料可供複製", "warning");
+                return;
+            }
+            
+            const tempInput = document.createElement('textarea');
+            tempInput.value = latestDebtsOutputText;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast("結算方案已複製，可直接貼到 LINE 社群分帳！", "success");
+                } else {
+                    showToast("複製失敗，請手動複製", "warning");
+                }
+            } catch (err) {
+                showToast("複製失敗，請手動複製", "warning");
+            }
+            document.body.removeChild(tempInput);
+        });
+
+        // --- 9. 全域共用工具輔助函式 ---
+
+        // HTML 安全防護防堵 XSS
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, "&amp;")
+                      .replace(/</g, "&lt;")
+                      .replace(/>/g, "&gt;")
+                      .replace(/"/g, "&quot;")
+                      .replace(/'/g, "&#039;");
+        }
+
+        // 格式化金錢 (取到小數第二位，若為整數則去零)
+        function formatMoney(num) {
+            const parsed = parseFloat(Number(num).toFixed(2));
+            return isNaN(parsed) ? '0' : parsed.toString();
+        }
+
+        // 更新連線狀態 UI 指示燈
+        function updateSyncStatus(text, color) {
+            const indicator = document.getElementById('syncIndicator');
+            const statusText = document.getElementById('syncStatusText');
+            statusText.innerText = text;
+
+            const baseClass = "relative flex h-3.5 w-3.5";
+            let pingColor = "bg-amber-400";
+            let dotColor = "bg-amber-500";
+
+            if (color === "green") {
+                pingColor = "bg-emerald-400";
+                dotColor = "bg-emerald-500";
+            } else if (color === "rose") {
+                pingColor = "bg-rose-400";
+                dotColor = "bg-rose-500";
+            }
+
+            indicator.innerHTML = `
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full ${pingColor} opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-3.5 w-3.5 ${dotColor}"></span>
+            `;
+        }
+
+        // 浮動訊息通知 (代替原生 alert)
+        function showToast(message, type = "info") {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = "p-4 rounded-xl shadow-lg border text-sm font-semibold flex items-center gap-2 transform translate-y-2 opacity-0 transition-all duration-300 pointer-events-auto max-w-sm";
+            
+            let bgClass = "bg-white border-slate-200 text-slate-800";
+            let icon = '<i class="fa-solid fa-circle-info text-blue-500"></i>';
+
+            if (type === "success") {
+                bgClass = "bg-emerald-50 border-emerald-150 text-emerald-800";
+                icon = '<i class="fa-solid fa-circle-check text-emerald-500"></i>';
+            } else if (type === "warning") {
+                bgClass = "bg-amber-50 border-amber-150 text-amber-800";
+                icon = '<i class="fa-solid fa-triangle-exclamation text-amber-500"></i>';
+            } else if (type === "error") {
+                bgClass = "bg-rose-50 border-rose-150 text-rose-800";
+                icon = '<i class="fa-solid fa-circle-xmark text-rose-500"></i>';
+            }
+
+            toast.className += ` ${bgClass}`;
+            toast.innerHTML = `${icon} <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            
+            // 進場動畫
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+
+            // 3秒後銷毀退場
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3500);
+        }
+
+        // 自製確認 Modal 對話框 (取代原生 confirm)
+        function showConfirmModal(question) {
+            return new Promise((resolve) => {
+                const modalDiv = document.createElement('div');
+                modalDiv.className = "fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4";
+                modalDiv.innerHTML = `
+                    <div class="bg-white rounded-2xl max-w-xs w-full p-6 shadow-2xl border border-slate-150 transform transition-all scale-100">
+                        <h4 class="text-md font-bold text-slate-900 mb-2">安全確認</h4>
+                        <p class="text-sm text-slate-500 mb-6">${question}</p>
+                        <div class="flex gap-2 justify-end">
+                            <button id="confirmNo" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition">取消</button>
+                            <button id="confirmYes" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow transition">確定</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modalDiv);
+
+                modalDiv.querySelector('#confirmNo').addEventListener('click', () => {
+                    modalDiv.remove();
+                    resolve(false);
+                });
+                modalDiv.querySelector('#confirmYes').addEventListener('click', () => {
+                    modalDiv.remove();
+                    resolve(true);
+                });
+            });
+        }
+    </script>
 </body>
 </html>
