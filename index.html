@@ -135,7 +135,7 @@
           message: ''
         },
 
-        // --- 彈出訊息提示函數 (核心修復：補回被遺漏的 showToast) ---
+        // --- 彈出訊息提示函數 (核心修復：100% 補全 showToast 方法，根除 TypeError) ---
         showToast(type, msg) {
           this.toast.message = msg;
           this.toast.type = type;
@@ -699,10 +699,15 @@
           }
         };
 
-        // 登入
+        // 登入：安全防護與自動降級匿名登入機制
         try {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            await signInWithCustomToken(auth, __initial_auth_token);
+            try {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } catch (tokenErr) {
+              console.warn("Token auth failed, fallback to anonymous login:", tokenErr);
+              await signInAnonymously(auth);
+            }
           } else {
             await signInAnonymously(auth);
           }
@@ -759,7 +764,7 @@
           <p class="text-xs text-gray-300 font-medium">親友團體旅遊・支援多幣別分帳與即時雲端</p>
         </div>
       </div>
-      <!-- 右側資訊 -->
+      <!-- 右側資訊 (優化連線狀態呈現，提供完整與友善的反饋) -->
       <div class="flex flex-col items-center sm:items-end gap-1 shrink-0">
         <div class="flex flex-wrap justify-center items-center gap-2 bg-gray-800 border border-gray-700 px-4 py-1.5 rounded-full text-xs">
           <span class="text-gray-300">👥 成員：</span>
@@ -769,8 +774,11 @@
           <span class="font-black text-yellow-300 text-sm" x-text="getTotalSpendingText()"></span>
         </div>
         <div class="text-[9px] text-gray-500 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block animate-ping"></span>
-          <span>即時備份中 | 帳本安全保管已啟動</span>
+          <span class="w-1.5 h-1.5 rounded-full inline-block" :class="currentUser ? 'bg-green-500 animate-ping' : 'bg-yellow-500'"></span>
+          <span>
+            <span x-text="currentUser ? '雲端即時同步中' : '本地暫存模式 (無雲端連線)'"></span>
+            <span x-show="currentUser"> | 用戶 ID: <span class="font-mono text-gray-400" x-text="currentUser ? currentUser.uid : ''"></span></span>
+          </span>
         </div>
       </div>
     </div>
@@ -791,7 +799,7 @@
       <div class="text-center">
         <span class="text-4xl shrink-0">⚠️</span>
         <h3 class="text-lg font-bold text-gray-800 mt-2" x-text="confirmModal.title">確認操作</h3>
-        <p class="text-slate-500 text-sm mt-2" x-text="confirmModal.message"></p>
+        <p class="text-gray-500 text-sm mt-2" x-text="confirmModal.message"></p>
       </div>
       <div class="flex gap-3 mt-6">
         <button @click="confirmModal.show = false" class="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-slate-700 font-bold text-sm transition-all">
@@ -842,7 +850,7 @@
     <!-- --- 分頁1：結算對帳 (預設首頁) --- -->
     <div x-show="activeTab === 'settlement'" class="space-y-6">
       
-      <!-- 匯率管理面板 (摺疊式 - 手機網格優化) -->
+      <!-- 匯率管理面板 (摺疊式) -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <button 
           @click="showRateSettings = !showRateSettings" 
@@ -1259,7 +1267,7 @@
                   <span class="font-semibold text-gray-700 text-sm truncate" x-text="member"></span>
                 </label>
 
-                <!-- 如果是不均等分帳，顯示金額輸入框 (改用 x-show 徹底杜絕 nesting templates _x_dataStack null bug) -->
+                <!-- 如果是不均等分帳，顯示金額輸入框 -->
                 <div x-show="expenseForm.splitType === 'custom' && expenseForm.participants.includes(member)" class="flex items-center gap-1 shrink-0 ml-2">
                   <span class="text-gray-400 text-xs shrink-0" x-text="getCurrencySymbol(expenseForm.currency)"></span>
                   <input 
@@ -1273,7 +1281,7 @@
             </template>
           </div>
           
-          <!-- 平分計算提示 (改用 x-show 替代 x-if) -->
+          <!-- 平分計算提示 -->
           <div x-show="expenseForm.splitType === 'equal' && expenseForm.participants.length > 0 && Number(expenseForm.amount) > 0" class="mt-3 text-right text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold space-y-1">
             <div>
               預估每人分攤：
@@ -1282,7 +1290,7 @@
             <div x-show="expenseForm.currency !== 'HKD'" class="text-gray-400 text-[11px]" x-text="getEstimatedShareHKDText()"></div>
           </div>
 
-          <!-- 不等分計算提示 (改用 x-show 替代 x-if) -->
+          <!-- 不等分計算提示 -->
           <div x-show="expenseForm.splitType === 'custom'" class="mt-3 flex justify-between items-center text-xs text-gray-500 border-t pt-2 border-dashed border-gray-200 font-semibold">
             <span>
               已分配總和：
@@ -1306,7 +1314,7 @@
       </form>
     </div>
 
-    <!-- --- 分頁4：成員維護 (核心修復：全面加入行內編輯更名與最安全的手機刪除觸發) --- -->
+    <!-- --- 分頁4：成員維護 --- -->
     <div x-show="activeTab === 'members'" class="max-w-2xl mx-auto space-y-6">
       <!-- 新增成員 -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
@@ -1332,7 +1340,7 @@
         </form>
       </div>
 
-      <!-- 成員列表 (完全使用 x-show 替換 x-if，絕不留給瀏覽器解析空 document 標籤的空間) -->
+      <!-- 成員列表 -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
         <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4" x-text="getMemberListTitle()"></h3>
         
@@ -1367,7 +1375,7 @@
                   <button 
                     type="button"
                     @click="askDeleteMember(member)"
-                    class="text-xs text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2 py-1.5 rounded-lg border border-red-200 font-bold transition-colors"
+                    class="text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2 py-1.5 rounded-lg border border-red-200 font-bold transition-colors shrink-0 ml-2"
                     title="刪除成員"
                   >
                     ❌ 刪除
@@ -1428,7 +1436,7 @@
                 </span>
               </div>
               
-              <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+              <div class="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
                 <div 
                   class="bg-green-500 h-full rounded-full"
                   :style="getMemberPaidWidthStyle(member)"
